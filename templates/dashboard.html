@@ -490,7 +490,7 @@ const COLORS = { blue:'#2563eb', teal:'#0d9488', green:'#16a34a', orange:'#ea580
 const PALETTE = ['#2563eb','#0d9488','#16a34a','#ea580c','#7c3aed','#dc2626','#0284c7','#b45309','#6d28d9','#059669','#e11d48','#4f46e5'];
 
 function fmt(v, pre='', suf='') { if (v == null) return '—'; return pre + Math.round(v).toLocaleString('en-US') + suf; }
-function fmtDate(d) { if (!d) return ''; const p = d.split('-'); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[parseInt(p[1])-1] + ' ' + p[0].slice(2); }
+function fmtDate(d) { if (!d) return ''; const p = d.split('-'); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[parseInt(p[1])-1] + " '" + p[0].slice(2); }
 function setChg(id, val) {
   const el = document.getElementById(id);
   if (val == null) { el.textContent = ''; return; }
