@@ -169,20 +169,20 @@ def verify_access(slug: str, token: str) -> str:
     return MANUFACTURER_BQ_NAMES[slug]
 
 
-def calc_fee(fee_info: dict, volume_g: float, revenue: float, months: int = 1) -> float:
+def calc_fee(fee_info: dict, volume_g, revenue, months: int = 1) -> float:
     """Calculate fee based on deal terms."""
     t = fee_info["type"]
     r = fee_info["rate"]
+    vol = float(volume_g or 0)
+    rev = float(revenue or 0)
     if t == "per_gram":
-        return (volume_g or 0) * r
+        return vol * r
     elif t == "percentage":
-        return (revenue or 0) * r
+        return rev * r
     elif t == "fixed":
         return r * months
     elif t == "advance":
-        # For advance/prepaid deals, the fee is the effective per-gram rate
-        # applied to actual volume sold in the period
-        return (volume_g or 0) * r
+        return vol * r
     return 0
 
 
