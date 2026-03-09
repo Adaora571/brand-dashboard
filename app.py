@@ -6,11 +6,12 @@ Queries BigQuery live data and serves per-manufacturer dashboards.
   edit the MANUFACTURER_FEES dict below. No other code changes needed.
 """
 
-import os, json, hashlib, hmac, logging, asyncio, time
+import os, json, hashlib, hmac, logging, asyncio, time, secrets
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Request, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request, HTTPException, Query, Form
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 from google.cloud import bigquery
 from google.api_core import exceptions as gcp_exceptions
 from google.oauth2 import service_account
@@ -54,6 +55,43 @@ class BigQueryError(Exception):
 app = FastAPI(title="HTV Brand Dashboard")
 templates = Jinja2Templates(directory="templates")
 
+# ============================================================
+# SESSION & SECURITY CONFIG
+# ============================================================
+SESSION_SECRET = os.getenv("SESSION_SECRET", secrets.token_hex(32))
+PASSWORD_EXPIRY_DAYS = int(os.getenv("PASSWORD_EXPIRY_DAYS", "90"))
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    session_cookie="htv_session",
+    max_age=8 * 3600,        # Session expires after 8 hours
+    same_site="lax",
+    https_only=os.getenv("RENDER", "") != "",  # HTTPS-only on Render
+)
+
+# ============================================================
+# RATE LIMITING (in-memory, per-IP)
+# ============================================================
+_login_attempts: dict[str, list[float]] = {}
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_SECONDS = 900  # 15 minutes
+
+
+def check_rate_limit(ip: str) -> bool:
+    """Return True if IP is allowed to attempt login, False if locked out."""
+    now = time.time()
+    attempts = _login_attempts.get(ip, [])
+    # Keep only attempts within the lockout window
+    attempts = [t for t in attempts if now - t < LOCKOUT_SECONDS]
+    _login_attempts[ip] = attempts
+    return len(attempts) < MAX_LOGIN_ATTEMPTS
+
+
+def record_failed_attempt(ip: str):
+    """Record a failed login attempt for rate limiting."""
+    _login_attempts.setdefault(ip, []).append(time.time())
+
 
 @app.exception_handler(BigQueryError)
 async def bigquery_error_handler(request: Request, exc: BigQueryError):
@@ -65,13 +103,13 @@ async def bigquery_error_handler(request: Request, exc: BigQueryError):
 
 @app.exception_handler(Exception)
 async def general_error_handler(request: Request, exc: Exception):
-    """Catch-all: return the traceback so we can debug remotely."""
+    """Catch-all: log the traceback but return a safe generic message."""
     import traceback
     tb = traceback.format_exc()
     logger.error("Unhandled error: %s\n%s", exc, tb)
     return JSONResponse(
         status_code=500,
-        content={"error": str(exc), "traceback": tb},
+        content={"error": "An unexpected error occurred. Please try again later."},
     )
 
 # ============================================================
@@ -101,10 +139,13 @@ else:
 PROJECT_DATASET = os.getenv("BQ_DATASET", "htv-data-foundation-prod.datamarts")
 
 # ============================================================
-# ★ MANUFACTURER TOKEN AUTH
-# Each manufacturer gets a unique URL: /brand/{slug}?token=xxx
+# ★ MANUFACTURER AUTH
+# Each manufacturer has a password (stored in env vars).
+# Passwords are compared using constant-time hmac to prevent
+# timing attacks. Set PASSWORD_SET_<SLUG> env vars to track
+# when passwords were last rotated (format: YYYY-MM-DD).
 # ============================================================
-MANUFACTURER_TOKENS = {
+MANUFACTURER_PASSWORDS = {
     "cannamedical":  os.getenv("TOKEN_CANNAMEDICAL",  "cm_demo_token_2025"),
     "four20":        os.getenv("TOKEN_FOUR20",         "f20_demo_token_2025"),
     "aurora":        os.getenv("TOKEN_AURORA",          "au_demo_token_2025"),
@@ -113,6 +154,13 @@ MANUFACTURER_TOKENS = {
     "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "al_demo_token_2025"),
     "iuvo":          os.getenv("TOKEN_IUVO",            "iv_demo_token_2025"),
     "avaay":         os.getenv("TOKEN_AVAAY",           "av_demo_token_2025"),
+}
+
+# Password set dates — used for 90-day expiry. Default = today (first deploy).
+_today_str = datetime.now().strftime("%Y-%m-%d")
+MANUFACTURER_PASSWORD_SET = {
+    slug: os.getenv(f"PASSWORD_SET_{slug.upper()}", _today_str)
+    for slug in MANUFACTURER_PASSWORDS
 }
 
 # Slug → actual BigQuery product_manufacturer_name
@@ -186,11 +234,31 @@ MANUFACTURER_FEES = {
 }
 # ============================================================
 
-def verify_access(slug: str, token: str) -> str:
-    """Verify token and return the BQ manufacturer name."""
-    expected = MANUFACTURER_TOKENS.get(slug)
-    if not expected or not hmac.compare_digest(token, expected):
-        raise HTTPException(status_code=403, detail="Invalid token")
+def verify_password(slug: str, password: str) -> bool:
+    """Check password using constant-time comparison."""
+    expected = MANUFACTURER_PASSWORDS.get(slug)
+    if not expected:
+        return False
+    return hmac.compare_digest(password, expected)
+
+
+def is_password_expired(slug: str) -> bool:
+    """Check if the manufacturer's password has exceeded the rotation period."""
+    set_date_str = MANUFACTURER_PASSWORD_SET.get(slug, "")
+    if not set_date_str:
+        return False
+    try:
+        set_date = datetime.strptime(set_date_str, "%Y-%m-%d")
+        return (datetime.now() - set_date).days > PASSWORD_EXPIRY_DAYS
+    except ValueError:
+        return False
+
+
+def verify_session(request: Request, slug: str) -> str:
+    """Check session cookie and return BQ manufacturer name, or raise 403."""
+    session_slug = request.session.get("slug")
+    if session_slug != slug:
+        raise HTTPException(status_code=403, detail="Not authenticated")
     return MANUFACTURER_BQ_NAMES[slug]
 
 
@@ -269,19 +337,77 @@ def date_params(start_date: str, end_date: str, category: str = ""):
 
 
 # ============================================================
-# PAGE ROUTE — serves the HTML dashboard
+# PAGE ROUTES — Login + Dashboard
 # ============================================================
 @app.get("/brand/{slug}", response_class=HTMLResponse)
-async def brand_page(request: Request, slug: str, token: str = ""):
-    mfg_name = verify_access(slug, token)
+async def brand_page(request: Request, slug: str):
+    """Show dashboard if logged in, otherwise redirect to login."""
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    # Check session
+    if request.session.get("slug") != slug:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "slug": slug,
+            "manufacturer_name": MANUFACTURER_BQ_NAMES[slug],
+            "error": "",
+        })
+
     fee = MANUFACTURER_FEES.get(slug, {})
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "slug": slug,
-        "token": token,
-        "manufacturer_name": mfg_name,
+        "manufacturer_name": MANUFACTURER_BQ_NAMES[slug],
         "fee": fee,
     })
+
+
+@app.post("/brand/{slug}/login")
+async def brand_login(request: Request, slug: str, password: str = Form(...)):
+    """Handle login form submission."""
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Rate limiting
+    if not check_rate_limit(client_ip):
+        return templates.TemplateResponse("login.html", {
+            "request": request, "slug": slug,
+            "manufacturer_name": mfg_name,
+            "error": "Too many login attempts. Please try again in 15 minutes.",
+        }, status_code=429)
+
+    # Check password expiry
+    if is_password_expired(slug):
+        return templates.TemplateResponse("login.html", {
+            "request": request, "slug": slug,
+            "manufacturer_name": mfg_name,
+            "error": "Your password has expired. Please contact HTV for a new password.",
+        }, status_code=403)
+
+    # Verify password
+    if not verify_password(slug, password):
+        record_failed_attempt(client_ip)
+        return templates.TemplateResponse("login.html", {
+            "request": request, "slug": slug,
+            "manufacturer_name": mfg_name,
+            "error": "Invalid password. Please try again.",
+        }, status_code=401)
+
+    # Success — set session
+    request.session["slug"] = slug
+    request.session["login_time"] = datetime.now().isoformat()
+    return RedirectResponse(url=f"/brand/{slug}", status_code=303)
+
+
+@app.get("/brand/{slug}/logout")
+async def brand_logout(request: Request, slug: str):
+    """Clear session and redirect to login."""
+    request.session.clear()
+    return RedirectResponse(url=f"/brand/{slug}", status_code=303)
 
 
 # ============================================================
@@ -289,10 +415,10 @@ async def brand_page(request: Request, slug: str, token: str = ""):
 # ============================================================
 @app.get("/api/brand/{slug}/summary")
 async def api_summary(
-    slug: str, token: str, start_date: str = "", end_date: str = "",
+    request: Request, slug: str, start_date: str = "", end_date: str = "",
     category: str = "", compare_start: str = "", compare_end: str = "",
 ):
-    mfg_name = verify_access(slug, token)
+    mfg_name = verify_session(request, slug)
 
     # Check cache first
     ck = cache_key("summary", slug=slug, s=start_date, e=end_date, cat=category,
@@ -402,8 +528,8 @@ async def api_summary(
 # API: Monthly Trends
 # ============================================================
 @app.get("/api/brand/{slug}/trends")
-async def api_trends(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
-    mfg_name = verify_access(slug, token)
+async def api_trends(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    mfg_name = verify_session(request, slug)
 
     ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category)
     cached = cache_get(ck)
@@ -444,10 +570,10 @@ async def api_trends(slug: str, token: str, start_date: str = "", end_date: str 
 # ============================================================
 @app.get("/api/brand/{slug}/products")
 async def api_products(
-    slug: str, token: str, start_date: str = "", end_date: str = "",
+    request: Request, slug: str, start_date: str = "", end_date: str = "",
     region: str = "", brand: str = "", category: str = "", origin: str = "",
 ):
-    mfg_name = verify_access(slug, token)
+    mfg_name = verify_session(request, slug)
 
     ck = cache_key("products", slug=slug, s=start_date, e=end_date,
                    region=region, brand=brand, category=category, origin=origin)
@@ -504,8 +630,8 @@ async def api_products(
 # API: Breakdowns (category, origin, price tier, products/order)
 # ============================================================
 @app.get("/api/brand/{slug}/breakdowns")
-async def api_breakdowns(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
-    mfg_name = verify_access(slug, token)
+async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    mfg_name = verify_session(request, slug)
 
     # Check cache first
     ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category)
@@ -578,8 +704,8 @@ async def api_breakdowns(slug: str, token: str, start_date: str = "", end_date: 
 # API: Patient Insights
 # ============================================================
 @app.get("/api/brand/{slug}/patients")
-async def api_patients(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
-    mfg_name = verify_access(slug, token)
+async def api_patients(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    mfg_name = verify_session(request, slug)
 
     ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category)
     cached = cache_get(ck)
@@ -653,8 +779,8 @@ async def api_patients(slug: str, token: str, start_date: str = "", end_date: st
 # API: Pricing (Avg €/g over time)
 # ============================================================
 @app.get("/api/brand/{slug}/pricing")
-async def api_pricing(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
-    mfg_name = verify_access(slug, token)
+async def api_pricing(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    mfg_name = verify_session(request, slug)
 
     ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category)
     cached = cache_get(ck)
@@ -682,8 +808,8 @@ async def api_pricing(slug: str, token: str, start_date: str = "", end_date: str
 # API: Categories for a manufacturer
 # ============================================================
 @app.get("/api/brand/{slug}/categories")
-async def api_categories(slug: str, token: str):
-    mfg_name = verify_access(slug, token)
+async def api_categories(request: Request, slug: str):
+    mfg_name = verify_session(request, slug)
     sql = f"""
     SELECT DISTINCT oi.product_vertical AS category
     FROM `{PROJECT_DATASET}.order_items` oi
