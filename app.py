@@ -258,9 +258,33 @@ async def brand_page(request: Request, slug: str, token: str = ""):
 # API: Summary KPIs
 # ============================================================
 @app.get("/api/brand/{slug}/summary")
-async def api_summary(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def api_summary(
+    slug: str, token: str, start_date: str = "", end_date: str = "",
+    category: str = "", compare_start: str = "", compare_end: str = "",
+):
     mfg_name = verify_access(slug, token)
     date_where, date_p = date_params(start_date, end_date, category)
+
+    # If the frontend doesn't supply explicit compare dates, fall back to
+    # the "previous period" logic (same-length window before start_date).
+    s = start_date or "2020-01-01"
+    e = end_date or datetime.now().strftime("%Y-%m-%d")
+    cs = compare_start or ""
+    ce = compare_end or ""
+
+    # Build comparison WHERE clause
+    if cs and ce:
+        # Frontend sent explicit comparison dates
+        compare_clause = "DATE(o.created_at) >= DATE(@comp_start) AND DATE(o.created_at) <= DATE(@comp_end)"
+    else:
+        # Default: mirror-length window right before the current start
+        compare_clause = (
+            "DATE(o.created_at) >= DATE_SUB(DATE(@comp_start), "
+            "INTERVAL DATE_DIFF(DATE(@comp_end), DATE(@comp_start), DAY) DAY) "
+            "AND DATE(o.created_at) < DATE(@comp_start)"
+        )
+        cs = s
+        ce = e
 
     sql = f"""
     WITH curr AS (
@@ -287,11 +311,7 @@ async def api_summary(slug: str, token: str, start_date: str = "", end_date: str
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE oi.product_manufacturer_name = @mfg
-        AND DATE(o.created_at) >= DATE_SUB(
-            DATE(@start_prev), INTERVAL
-            DATE_DIFF(DATE(@end_prev), DATE(@start_prev), DAY) DAY
-        )
-        AND DATE(o.created_at) < DATE(@start_prev)
+        AND {compare_clause}
         {"AND oi.product_vertical = @category" if category else ""}
     )
     SELECT
@@ -300,12 +320,10 @@ async def api_summary(slug: str, token: str, start_date: str = "", end_date: str
     FROM curr c, prev p
     """
 
-    s = start_date or "2020-01-01"
-    e = end_date or datetime.now().strftime("%Y-%m-%d")
     params = [
         bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name),
-        bigquery.ScalarQueryParameter("start_prev", "DATE", s),
-        bigquery.ScalarQueryParameter("end_prev", "DATE", e),
+        bigquery.ScalarQueryParameter("comp_start", "DATE", cs),
+        bigquery.ScalarQueryParameter("comp_end", "DATE", ce),
     ] + date_p
 
     rows = run_query(sql, params)

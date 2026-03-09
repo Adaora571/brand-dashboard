@@ -26,6 +26,80 @@
   .btn-freq:hover { border-color:#94a3b8; color:#fff; }
   .btn-freq.active { background:#475569; color:#fff; border-color:#64748b; }
   .last-updated { font-size:11px; color:#94a3b8; white-space:nowrap; }
+
+  /* ======================== */
+  /* SHOPIFY-STYLE DATE PICKER */
+  /* ======================== */
+  .date-trigger {
+    background:#334155; color:#fff; border:1px solid #475569; border-radius:20px;
+    padding:8px 16px; font-size:12px; font-family:inherit; cursor:pointer;
+    display:flex; align-items:center; gap:8px; transition:all 0.15s;
+  }
+  .date-trigger:hover { border-color:#94a3b8; }
+  .date-trigger .date-icon { font-size:14px; opacity:0.7; }
+  .date-trigger .date-text { font-weight:500; }
+  .date-trigger .date-compare { font-size:11px; color:#94a3b8; margin-left:4px; }
+
+  .date-panel {
+    position:absolute; top:100%; right:0; margin-top:8px; z-index:1000;
+    background:#fff; border:1px solid var(--border); border-radius:12px;
+    box-shadow:0 12px 40px rgba(0,0,0,0.15); width:540px;
+    display:none; color:var(--text);
+  }
+  .date-panel.open { display:block; }
+  .date-panel-inner { display:flex; }
+  .presets {
+    width:160px; border-right:1px solid var(--border); padding:12px 0;
+    background:#f8fafc; border-radius:12px 0 0 12px;
+  }
+  .preset-btn {
+    display:block; width:100%; text-align:left; padding:8px 16px;
+    border:none; background:none; font-size:12px; color:var(--text);
+    cursor:pointer; transition:background 0.1s; font-family:inherit;
+  }
+  .preset-btn:hover { background:#e2e8f0; }
+  .preset-btn.active { background:#dbeafe; color:var(--blue); font-weight:600; }
+  .date-custom { flex:1; padding:16px; }
+  .date-row { display:flex; gap:12px; margin-bottom:14px; align-items:center; }
+  .date-row label { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; min-width:40px; }
+  .date-row input[type=date] {
+    flex:1; border:1px solid var(--border); border-radius:6px;
+    padding:8px 10px; font-size:12px; font-family:inherit; outline:none;
+    color:var(--text);
+  }
+  .date-row input[type=date]:focus { border-color:var(--blue); box-shadow:0 0 0 2px rgba(37,99,235,0.1); }
+  .compare-section { border-top:1px solid var(--border); padding-top:14px; margin-top:6px; }
+  .compare-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .compare-toggle {
+    width:36px; height:20px; border-radius:10px; background:#cbd5e1;
+    border:none; cursor:pointer; position:relative; transition:background 0.2s;
+  }
+  .compare-toggle.on { background:var(--blue); }
+  .compare-toggle::after {
+    content:''; position:absolute; top:2px; left:2px;
+    width:16px; height:16px; border-radius:50%; background:#fff;
+    transition:transform 0.2s;
+  }
+  .compare-toggle.on::after { transform:translateX(16px); }
+  .compare-label { font-size:12px; font-weight:600; }
+  .compare-options { display:flex; flex-wrap:wrap; gap:6px; }
+  .compare-opt {
+    padding:6px 12px; border:1px solid var(--border); border-radius:16px;
+    font-size:11px; cursor:pointer; background:#fff; transition:all 0.15s;
+    font-family:inherit; color:var(--text);
+  }
+  .compare-opt:hover { border-color:var(--blue); color:var(--blue); }
+  .compare-opt.active { background:#dbeafe; border-color:var(--blue); color:var(--blue); font-weight:600; }
+  .date-panel-footer {
+    display:flex; justify-content:flex-end; gap:8px;
+    padding:12px 16px; border-top:1px solid var(--border);
+  }
+  .btn-cancel { padding:8px 18px; border:1px solid var(--border); border-radius:8px; background:#fff; font-size:12px; cursor:pointer; font-family:inherit; color:var(--muted); }
+  .btn-apply-date { padding:8px 18px; border:none; border-radius:8px; background:var(--blue); color:#fff; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; }
+  .btn-apply-date:hover { background:#1d4ed8; }
+  .compare-info { margin-top:10px; font-size:11px; color:#64748b; }
+  .compare-info strong { color:var(--text); }
+  .pos-rel { position:relative; }
   .container { max-width:1440px; margin:0 auto; padding:24px 32px; }
   .section-title { font-size:16px; font-weight:700; margin:28px 0 14px; display:flex; align-items:center; gap:8px; }
   .section-title .num { background:var(--blue); color:#fff; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }
@@ -128,18 +202,73 @@
     <h1>{{ manufacturer_name }} — Brand Dashboard</h1>
     <div class="subtitle">HTV Data Foundation &bull; Live data &bull; <span id="lastUpdated">—</span></div>
   </div>
-  <div class="header-controls">
-    <label>From</label>
-    <input type="date" id="startDate" value="2025-01-01">
-    <label>To</label>
-    <input type="date" id="endDate" value="2026-03-09">
+  <div class="header-controls pos-rel">
+    <!-- Shopify-style date picker trigger -->
+    <button class="date-trigger" id="dateTrigger" onclick="toggleDatePanel()">
+      <span class="date-icon">📅</span>
+      <span class="date-text" id="dateTriggerText">Jan 1 – Mar 9, 2026</span>
+      <span class="date-compare" id="dateTriggerCompare">vs prev period</span>
+      <span style="opacity:0.5">▾</span>
+    </button>
+
     <select id="globalCategory" onchange="loadAll()" style="background:#334155;color:#fff;border:1px solid #475569;border-radius:20px;padding:7px 14px;font-size:12px;font-family:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:130px;">
       <option value="">All Categories</option>
     </select>
-    <button class="btn-apply" id="btnApply" onclick="loadAll()">Apply</button>
+
     <button class="btn-freq active" data-freq="monthly" onclick="setFreq(this)">Monthly</button>
     <button class="btn-freq" data-freq="weekly" onclick="setFreq(this)">Weekly</button>
     <button class="btn-freq" data-freq="daily" onclick="setFreq(this)">Daily</button>
+
+    <!-- Date picker dropdown panel -->
+    <div class="date-panel" id="datePanel">
+      <div class="date-panel-inner">
+        <div class="presets">
+          <button class="preset-btn" data-preset="today" onclick="selectPreset(this)">Today</button>
+          <button class="preset-btn" data-preset="yesterday" onclick="selectPreset(this)">Yesterday</button>
+          <button class="preset-btn" data-preset="last7" onclick="selectPreset(this)">Last 7 days</button>
+          <button class="preset-btn" data-preset="last30" onclick="selectPreset(this)">Last 30 days</button>
+          <button class="preset-btn" data-preset="last90" onclick="selectPreset(this)">Last 90 days</button>
+          <button class="preset-btn" data-preset="last12m" onclick="selectPreset(this)">Last 12 months</button>
+          <button class="preset-btn" data-preset="mtd" onclick="selectPreset(this)">Month to date</button>
+          <button class="preset-btn active" data-preset="ytd" onclick="selectPreset(this)">Year to date</button>
+          <button class="preset-btn" data-preset="custom" onclick="selectPreset(this)">Custom</button>
+        </div>
+        <div class="date-custom">
+          <div class="date-row">
+            <label>From</label>
+            <input type="date" id="dpFrom">
+          </div>
+          <div class="date-row">
+            <label>To</label>
+            <input type="date" id="dpTo">
+          </div>
+          <div class="compare-section">
+            <div class="compare-header">
+              <button class="compare-toggle on" id="compareToggle" onclick="toggleCompare()"></button>
+              <span class="compare-label">Compare to</span>
+            </div>
+            <div class="compare-options" id="compareOptions">
+              <button class="compare-opt active" data-cmp="prev" onclick="setCompareMode(this)">Previous period</button>
+              <button class="compare-opt" data-cmp="mom" onclick="setCompareMode(this)">MoM</button>
+              <button class="compare-opt" data-cmp="wow" onclick="setCompareMode(this)">WoW</button>
+              <button class="compare-opt" data-cmp="dod" onclick="setCompareMode(this)">DoD</button>
+              <button class="compare-opt" data-cmp="yoy" onclick="setCompareMode(this)">YoY</button>
+            </div>
+            <div class="compare-info" id="compareInfo">📊 Comparing to: <strong id="compareRangeText">—</strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="date-panel-footer">
+        <button class="btn-cancel" onclick="cancelDatePanel()">Cancel</button>
+        <button class="btn-apply-date" id="btnApply" onclick="applyDatePanel()">Apply</button>
+      </div>
+    </div>
+
+    <!-- Hidden inputs for the actual active dates (used by apiFetch) -->
+    <input type="hidden" id="startDate" value="2025-01-01">
+    <input type="hidden" id="endDate" value="2026-03-09">
+    <input type="hidden" id="compareStart" value="">
+    <input type="hidden" id="compareEnd" value="">
   </div>
 </div>
 
@@ -328,9 +457,12 @@ const API = `/api/brand/${SLUG}`;
 async function apiFetch(endpoint, extraParams = '') {
   const s = document.getElementById('startDate').value;
   const e = document.getElementById('endDate').value;
+  const cs = document.getElementById('compareStart').value;
+  const ce = document.getElementById('compareEnd').value;
   const cat = document.getElementById('globalCategory').value;
   const catParam = cat ? `&category=${encodeURIComponent(cat)}` : '';
-  const url = `${API}/${endpoint}?token=${TOKEN}&start_date=${s}&end_date=${e}&freq=${currentFreq}${catParam}${extraParams}`;
+  const cmpParam = (cs && ce) ? `&compare_start=${cs}&compare_end=${ce}` : '';
+  const url = `${API}/${endpoint}?token=${TOKEN}&start_date=${s}&end_date=${e}&freq=${currentFreq}${catParam}${cmpParam}${extraParams}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -360,7 +492,17 @@ const PALETTE = ['#2563eb','#0d9488','#16a34a','#ea580c','#7c3aed','#dc2626','#0
 
 function fmt(v, pre='', suf='') { if (v == null) return '—'; return pre + Math.round(v).toLocaleString('en-US') + suf; }
 function fmtDate(d) { if (!d) return ''; const p = d.split('-'); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[parseInt(p[1])-1] + ' ' + p[0].slice(2); }
-function setChg(id, val) { const el = document.getElementById(id); if (val == null) { el.textContent = ''; return; } const p = (val*100).toFixed(1); const freqLabel = {monthly:'MoM',weekly:'WoW',daily:'DoD'}[currentFreq]||'MoM'; el.textContent = (val >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '% ' + freqLabel; el.className = 'change ' + (val >= 0 ? 'up' : 'down'); }
+function setChg(id, val) {
+  const el = document.getElementById(id);
+  if (val == null) { el.textContent = ''; return; }
+  const p = (val*100).toFixed(1);
+  const cmpLabels = { prev:'vs prev period', mom:'MoM', wow:'WoW', dod:'DoD', yoy:'YoY' };
+  const cmpOn = document.getElementById('compareToggle')?.classList.contains('on');
+  const cmpMode = document.querySelector('.compare-opt.active')?.dataset.cmp || 'prev';
+  const label = cmpOn ? (cmpLabels[cmpMode] || 'vs prev') : 'vs prev period';
+  el.textContent = (val >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '% ' + label;
+  el.className = 'change ' + (val >= 0 ? 'up' : 'down');
+}
 
 const chartInstances = {};
 function createOrUpdate(id, cfg) { if (chartInstances[id]) chartInstances[id].destroy(); chartInstances[id] = new Chart(document.getElementById(id), cfg); }
@@ -872,11 +1014,215 @@ async function loadCategories() {
   } catch (e) { console.error('Failed to load categories:', e); }
 }
 
+// ============================================================
+// SHOPIFY-STYLE DATE PICKER LOGIC
+// ============================================================
+let dpActivePreset = 'ytd';
+let dpCompareOn = true;
+let dpCompareMode = 'prev';
+
+function toggleDatePanel() {
+  const panel = document.getElementById('datePanel');
+  if (panel.classList.contains('open')) {
+    panel.classList.remove('open');
+  } else {
+    // Sync picker inputs from the current hidden values
+    document.getElementById('dpFrom').value = document.getElementById('startDate').value;
+    document.getElementById('dpTo').value = document.getElementById('endDate').value;
+    updateCompareInfo();
+    panel.classList.add('open');
+  }
+}
+
+function cancelDatePanel() {
+  document.getElementById('datePanel').classList.remove('open');
+}
+
+function applyDatePanel() {
+  const from = document.getElementById('dpFrom').value;
+  const to = document.getElementById('dpTo').value;
+  if (!from || !to) return;
+
+  document.getElementById('startDate').value = from;
+  document.getElementById('endDate').value = to;
+
+  // Compute comparison dates
+  const cmp = getCompareDates(from, to);
+  document.getElementById('compareStart').value = dpCompareOn ? cmp.start : '';
+  document.getElementById('compareEnd').value = dpCompareOn ? cmp.end : '';
+
+  // Update trigger button text
+  updateTriggerText(from, to);
+  document.getElementById('datePanel').classList.remove('open');
+  loadAll();
+}
+
+function selectPreset(btn) {
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  dpActivePreset = btn.dataset.preset;
+
+  const today = new Date();
+  const todayStr = isoDate(today);
+  let from, to = todayStr;
+
+  switch (dpActivePreset) {
+    case 'today':
+      from = todayStr; break;
+    case 'yesterday':
+      from = to = isoDate(addDays(today, -1)); break;
+    case 'last7':
+      from = isoDate(addDays(today, -6)); break;
+    case 'last30':
+      from = isoDate(addDays(today, -29)); break;
+    case 'last90':
+      from = isoDate(addDays(today, -89)); break;
+    case 'last12m':
+      from = isoDate(addMonths(today, -12)); break;
+    case 'mtd':
+      from = todayStr.slice(0,8) + '01'; break;
+    case 'ytd':
+      from = todayStr.slice(0,4) + '-01-01'; break;
+    case 'custom':
+      // Don't change dates, let user edit
+      return;
+    default:
+      from = todayStr.slice(0,4) + '-01-01';
+  }
+
+  document.getElementById('dpFrom').value = from;
+  document.getElementById('dpTo').value = to;
+  updateCompareInfo();
+}
+
+function toggleCompare() {
+  const toggle = document.getElementById('compareToggle');
+  toggle.classList.toggle('on');
+  dpCompareOn = toggle.classList.contains('on');
+  document.getElementById('compareOptions').style.opacity = dpCompareOn ? 1 : 0.4;
+  document.getElementById('compareOptions').style.pointerEvents = dpCompareOn ? 'auto' : 'none';
+  document.getElementById('compareInfo').style.display = dpCompareOn ? 'block' : 'none';
+}
+
+function setCompareMode(btn) {
+  document.querySelectorAll('.compare-opt').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  dpCompareMode = btn.dataset.cmp;
+  updateCompareInfo();
+}
+
+function getCompareDates(fromStr, toStr) {
+  const from = new Date(fromStr + 'T00:00:00');
+  const to = new Date(toStr + 'T00:00:00');
+  const daySpan = Math.round((to - from) / 86400000);
+
+  let cStart, cEnd;
+  switch (dpCompareMode) {
+    case 'prev':
+      // Same-length window immediately before
+      cEnd = isoDate(addDays(from, -1));
+      cStart = isoDate(addDays(from, -daySpan - 1));
+      break;
+    case 'mom':
+      // Same dates, previous month
+      cStart = isoDate(addMonths(from, -1));
+      cEnd = isoDate(addMonths(to, -1));
+      break;
+    case 'wow':
+      // Same dates, previous week
+      cStart = isoDate(addDays(from, -7));
+      cEnd = isoDate(addDays(to, -7));
+      break;
+    case 'dod':
+      // Previous day for each
+      cStart = isoDate(addDays(from, -1));
+      cEnd = isoDate(addDays(to, -1));
+      break;
+    case 'yoy':
+      // Same dates, previous year
+      cStart = isoDate(addYears(from, -1));
+      cEnd = isoDate(addYears(to, -1));
+      break;
+    default:
+      cEnd = isoDate(addDays(from, -1));
+      cStart = isoDate(addDays(from, -daySpan - 1));
+  }
+  return { start: cStart, end: cEnd };
+}
+
+function updateCompareInfo() {
+  const from = document.getElementById('dpFrom').value;
+  const to = document.getElementById('dpTo').value;
+  if (!from || !to) return;
+  const cmp = getCompareDates(from, to);
+  document.getElementById('compareRangeText').textContent = fmtShort(cmp.start) + ' – ' + fmtShort(cmp.end);
+}
+
+function updateTriggerText(from, to) {
+  const text = fmtShort(from) + ' – ' + fmtShort(to);
+  document.getElementById('dateTriggerText').textContent = text;
+  const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year' };
+  document.getElementById('dateTriggerCompare').textContent = dpCompareOn ? (cmpLabels[dpCompareMode]||'') : '';
+}
+
+// ---- date helpers ----
+function isoDate(d) { return d.toISOString().slice(0,10); }
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+function addMonths(d, n) { const r = new Date(d); r.setMonth(r.getMonth()+n); return r; }
+function addYears(d, n) { const r = new Date(d); r.setFullYear(r.getFullYear()+n); return r; }
+function fmtShort(dateStr) {
+  if (!dateStr) return '';
+  const [y,m,d] = dateStr.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[parseInt(m)-1] + ' ' + parseInt(d) + ', ' + y;
+}
+
+// Close date panel when clicking outside
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('datePanel');
+  if (panel && panel.classList.contains('open') && !e.target.closest('.date-trigger') && !e.target.closest('.date-panel')) {
+    panel.classList.remove('open');
+  }
+});
+
+// Listen for manual date input changes in the picker
+document.addEventListener('DOMContentLoaded', () => {
+  const dpF = document.getElementById('dpFrom');
+  const dpT = document.getElementById('dpTo');
+  if (dpF) dpF.addEventListener('change', () => {
+    // Switch to Custom when user manually edits dates
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.preset-btn[data-preset="custom"]')?.classList.add('active');
+    dpActivePreset = 'custom';
+    updateCompareInfo();
+  });
+  if (dpT) dpT.addEventListener('change', () => {
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.preset-btn[data-preset="custom"]')?.classList.add('active');
+    dpActivePreset = 'custom';
+    updateCompareInfo();
+  });
+});
+
+// ============================================================
+
 window.addEventListener('DOMContentLoaded', async () => {
+  // Initialize date picker with YTD preset
+  const today = new Date();
+  const todayStr = isoDate(today);
+  document.getElementById('startDate').value = todayStr.slice(0,4) + '-01-01';
+  document.getElementById('endDate').value = todayStr;
+  document.getElementById('dpFrom').value = todayStr.slice(0,4) + '-01-01';
+  document.getElementById('dpTo').value = todayStr;
+
+  // Compute default comparison (prev period for YTD)
+  const cmp = getCompareDates(document.getElementById('startDate').value, todayStr);
+  document.getElementById('compareStart').value = cmp.start;
+  document.getElementById('compareEnd').value = cmp.end;
+  updateTriggerText(document.getElementById('startDate').value, todayStr);
+
   await loadCategories();
   loadAll();
-  document.getElementById('startDate').addEventListener('change', () => loadAll());
-  document.getElementById('endDate').addEventListener('change', () => loadAll());
 });
 </script>
 </body>
