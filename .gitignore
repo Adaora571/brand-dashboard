@@ -1,0 +1,12 @@
+# Service account keys — NEVER commit these
+sa-key.json
+*key*.json
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+
+# OS files
+.DS_Store

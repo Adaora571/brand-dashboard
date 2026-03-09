@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brand Dashboard — {{ manufacturer_name }}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --blue: #2563eb; --teal: #0d9488; --green: #16a34a; --orange: #ea580c;
+    --purple: #7c3aed; --red: #dc2626; --bg: #f8fafc; --card: #fff;
+    --border: #e2e8f0; --text: #1e293b; --muted: #64748b;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:var(--bg); color:var(--text); font-size:13px; }
+  .header { background:linear-gradient(135deg,#1e293b 0%,#334155 100%); color:#fff; padding:18px 32px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+  .header h1 { font-size:22px; font-weight:700; }
+  .header .subtitle { color:#94a3b8; font-size:12px; margin-top:2px; }
+  .header-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .header-controls label { font-size:11px; color:#94a3b8; font-weight:500; }
+  .header-controls input[type=date] { background:#334155; color:#fff; border:1px solid #475569; border-radius:20px; padding:7px 14px; font-size:12px; font-family:inherit; outline:none; -webkit-appearance:none; }
+  .header-controls input[type=date]::-webkit-calendar-picker-indicator { filter:invert(1); opacity:0.6; }
+  .btn-apply { background:#16a34a; color:#fff; border:none; border-radius:20px; padding:8px 22px; font-size:12px; font-weight:600; cursor:pointer; transition:background 0.15s; }
+  .btn-apply:hover { background:#15803d; }
+  .btn-freq { background:transparent; color:#cbd5e1; border:1px solid #475569; border-radius:20px; padding:7px 18px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.15s; }
+  .btn-freq:hover { border-color:#94a3b8; color:#fff; }
+  .btn-freq.active { background:#475569; color:#fff; border-color:#64748b; }
+  .last-updated { font-size:11px; color:#94a3b8; white-space:nowrap; }
+  .container { max-width:1440px; margin:0 auto; padding:24px 32px; }
+  .section-title { font-size:16px; font-weight:700; margin:28px 0 14px; display:flex; align-items:center; gap:8px; }
+  .section-title .num { background:var(--blue); color:#fff; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }
+  .grid { display:grid; gap:16px; }
+  .grid-5 { grid-template-columns: repeat(5, 1fr); }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
+  .kpi-card { text-align:left; border-top:3px solid var(--blue); padding:20px 18px 16px; position:relative; }
+  .kpi-card.accent-blue    { border-top-color:#2563eb; }
+  .kpi-card.accent-teal    { border-top-color:#0d9488; }
+  .kpi-card.accent-green   { border-top-color:#16a34a; }
+  .kpi-card.accent-purple  { border-top-color:#7c3aed; }
+  .kpi-card.accent-orange  { border-top-color:#ea580c; }
+  .kpi-card.accent-red     { border-top-color:#dc2626; }
+  .kpi-card .label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
+  .kpi-card .value { font-size:26px; font-weight:700; margin:8px 0 6px; color:var(--text); }
+  .kpi-card .change { font-size:11px; font-weight:600; }
+  .kpi-card .change.up { color:var(--green); }
+  .kpi-card .change.down { color:var(--red); }
+  .kpi-card .kpi-desc { font-size:11px; color:#94a3b8; margin-top:4px; }
+  .chart-box { height:280px; position:relative; }
+  .chart-box canvas { width:100%!important; height:100%!important; }
+
+  /* Deal terms card */
+  .deal-card { display:flex; align-items:center; gap:24px; padding:14px 20px; background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%); border:1px solid #f59e0b44; border-radius:10px; margin-bottom:16px; }
+  .deal-card .deal-icon { width:42px; height:42px; background:#f59e0b; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; font-weight:700; flex-shrink:0; }
+  .deal-card .deal-body { flex:1; }
+  .deal-card .deal-label { font-size:11px; color:#92400e; text-transform:uppercase; font-weight:600; letter-spacing:0.5px; }
+  .deal-card .deal-value { font-size:20px; font-weight:700; color:#78350f; margin:2px 0; }
+  .deal-card .deal-desc { font-size:12px; color:#92400e; }
+  .deal-card .deal-meta { text-align:right; font-size:11px; color:#b45309; }
+
+  /* Fee & Product tables */
+  .fee-table, table.prod { width:100%; border-collapse:collapse; font-size:12px; }
+  .fee-table th, table.prod th { background:#f1f5f9; padding:8px 10px; text-align:left; font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; border-bottom:2px solid var(--border); white-space:nowrap; position:sticky; top:0; z-index:2; }
+  .fee-table td, table.prod td { padding:8px 10px; border-bottom:1px solid #f1f5f9; }
+  .fee-table .r, table.prod .r { text-align:right; font-variant-numeric:tabular-nums; }
+  .fee-table tfoot td { font-weight:700; background:#f8fafc; border-top:2px solid var(--border); }
+  .tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600; }
+  .tag.fl { background:#dcfce7; color:#166534; }
+  .tag.ex { background:#dbeafe; color:#1e40af; }
+  .tag.ot { background:#f1f5f9; color:#475569; }
+
+  /* Filter bar */
+  .filter-bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:14px; padding:10px 14px; background:#f8fafc; border:1px solid var(--border); border-radius:8px; }
+  .filter-group { display:flex; flex-direction:column; gap:2px; }
+  .filter-group label { font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:600; letter-spacing:0.3px; }
+  .filter-select { border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:140px; background:#fff; }
+  .btn-clear-filters { background:#f1f5f9; color:var(--muted); border:1px solid var(--border); border-radius:6px; padding:6px 14px; font-size:11px; cursor:pointer; font-weight:500; margin-left:auto; }
+  .btn-clear-filters:hover { background:#e2e8f0; color:var(--text); }
+  .filter-tag { font-size:11px; color:var(--blue); font-weight:500; margin-left:8px; }
+
+  /* ======================== */
+  /* GOOGLE SHEETS FILTER     */
+  /* ======================== */
+  .col-filter-btn { background:none; border:none; cursor:pointer; font-size:10px; color:#94a3b8; padding:0 2px; vertical-align:middle; margin-left:3px; transition:color 0.15s; }
+  .col-filter-btn:hover, .col-filter-btn.active { color:var(--blue); }
+  .col-filter-panel { position:absolute; top:100%; left:0; z-index:1000; background:#fff; border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,0.12); min-width:240px; max-width:300px; padding:0; display:none; }
+  .col-filter-panel.open { display:block; }
+  .cfp-section { padding:8px 12px; border-bottom:1px solid #f1f5f9; }
+  .cfp-section:last-child { border-bottom:none; }
+  .cfp-title { font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:600; letter-spacing:0.3px; margin-bottom:6px; }
+  .cfp-sort-btn { display:flex; align-items:center; gap:6px; width:100%; padding:6px 8px; border:none; background:none; cursor:pointer; font-size:12px; color:var(--text); border-radius:4px; text-align:left; }
+  .cfp-sort-btn:hover { background:#f1f5f9; }
+  .cfp-sort-btn .icon { font-size:14px; width:18px; text-align:center; }
+  .cfp-search { width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px; font-size:11px; margin-bottom:6px; }
+  .cfp-values { max-height:180px; overflow-y:auto; }
+  .cfp-values label { display:flex; align-items:center; gap:6px; padding:3px 0; font-size:12px; cursor:pointer; }
+  .cfp-values label:hover { color:var(--blue); }
+  .cfp-values input[type=checkbox] { accent-color:var(--blue); }
+  .cfp-actions { display:flex; gap:6px; justify-content:flex-end; padding:8px 12px; border-top:1px solid #f1f5f9; }
+  .cfp-actions button { padding:5px 14px; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer; border:1px solid var(--border); }
+  .cfp-actions .cfp-apply { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .cfp-actions .cfp-clear { background:#fff; color:var(--muted); }
+
+  /* Condition filter */
+  .cfp-cond-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .cfp-cond-select, .cfp-cond-input { border:1px solid var(--border); border-radius:4px; padding:4px 6px; font-size:11px; }
+  .cfp-cond-select { min-width:110px; }
+  .cfp-cond-input { flex:1; min-width:0; }
+
+  @media (max-width:1100px) {
+    .grid-5 { grid-template-columns: repeat(3, 1fr); }
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width:900px) {
+    .grid-5, .grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .container { padding:16px; }
+    .header { padding:14px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER (integrated controls) -->
+<div class="header">
+  <div>
+    <h1>{{ manufacturer_name }} — Brand Dashboard</h1>
+    <div class="subtitle">HTV Data Foundation &bull; Live data &bull; <span id="lastUpdated">—</span></div>
+  </div>
+  <div class="header-controls">
+    <label>From</label>
+    <input type="date" id="startDate" value="2025-01-01">
+    <label>To</label>
+    <input type="date" id="endDate" value="2026-03-09">
+    <select id="globalCategory" onchange="loadAll()" style="background:#334155;color:#fff;border:1px solid #475569;border-radius:20px;padding:7px 14px;font-size:12px;font-family:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:130px;">
+      <option value="">All Categories</option>
+    </select>
+    <button class="btn-apply" id="btnApply" onclick="loadAll()">Apply</button>
+    <button class="btn-freq active" data-freq="monthly" onclick="setFreq(this)">Monthly</button>
+    <button class="btn-freq" data-freq="weekly" onclick="setFreq(this)">Weekly</button>
+    <button class="btn-freq" data-freq="daily" onclick="setFreq(this)">Daily</button>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- SECTION 1: KPIs -->
+<div class="section-title"><span class="num">1</span> Top-Line KPIs</div>
+<div class="grid grid-5" id="kpiGrid">
+  <div class="card kpi-card accent-blue"><div class="label"># Prescriptions</div><div class="value" id="k-rx">—</div><div class="change" id="k-rx-chg"></div><div class="kpi-desc">Unique orders</div></div>
+  <div class="card kpi-card accent-teal"><div class="label">Revenue (€)</div><div class="value" id="k-rev">—</div><div class="change" id="k-rev-chg"></div><div class="kpi-desc">Gross revenue incl. VAT</div></div>
+  <div class="card kpi-card accent-green"><div class="label">Sales Volume (g)</div><div class="value" id="k-vol">—</div><div class="change" id="k-vol-chg"></div><div class="kpi-desc">Grams sold</div></div>
+  <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">After cancellations + discounts</div></div>
+  <div class="card kpi-card accent-orange"><div class="label">Cancellation Rate</div><div class="value" id="k-cancel">—</div><div class="kpi-desc">Cancelled / Gross qty</div></div>
+</div>
+<div class="grid grid-4" style="margin-top:16px;">
+  <div class="card kpi-card accent-blue"><div class="label">Avg g / Prescription</div><div class="value" id="k-gpx">—</div><div class="kpi-desc">Volume / # Prescriptions</div></div>
+  <div class="card kpi-card accent-teal"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="kpi-desc">Net Revenue / Volume</div></div>
+  <div class="card kpi-card accent-green"><div class="label">Avg Products / Order</div><div class="value" id="k-ppo">—</div><div class="kpi-desc">From orders table</div></div>
+  <div class="card kpi-card accent-purple"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
+</div>
+
+<!-- SECTION 2: TRANSACTION FEE -->
+<div class="section-title"><span class="num">2</span> Transaction Data Fee</div>
+
+<!-- Deal Terms Card -->
+<div class="deal-card" id="dealTermsCard">
+  <div class="deal-icon">€</div>
+  <div class="deal-body">
+    <div class="deal-label">Current Deal Terms</div>
+    <div class="deal-value" id="dealValue">—</div>
+    <div class="deal-desc" id="dealDesc">—</div>
+  </div>
+  <div class="deal-meta">
+    <div id="dealType">—</div>
+    <div id="dealCalc" style="font-size:15px;font-weight:700;color:#78350f;margin-top:4px;">—</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Fee Over Time</div>
+    <div class="chart-box"><canvas id="chartFee"></canvas></div>
+  </div>
+  <div class="card" style="overflow-x:auto;">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Fee Breakdown</div>
+    <table class="fee-table" id="feeTableEl">
+      <thead>
+        <tr>
+          <th>Period <button class="col-filter-btn" onclick="openColFilter(event,'fee',0)">▼</button></th>
+          <th class="r">Grams <button class="col-filter-btn" onclick="openColFilter(event,'fee',1)">▼</button></th>
+          <th class="r">Revenue <button class="col-filter-btn" onclick="openColFilter(event,'fee',2)">▼</button></th>
+          <th class="r">Rate</th>
+          <th class="r">Fee <button class="col-filter-btn" onclick="openColFilter(event,'fee',3)">▼</button></th>
+        </tr>
+      </thead>
+      <tbody id="feeBody"></tbody>
+      <tfoot><tr>
+        <td style="font-weight:700;">Total</td>
+        <td class="r" id="feeTotalVol">—</td>
+        <td class="r" id="feeTotalRev">—</td>
+        <td class="r" style="color:#888;">—</td>
+        <td class="r" style="color:#92400e;" id="feeTotalAmt">—</td>
+      </tr></tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- SECTION 3: TRENDS -->
+<div class="section-title"><span class="num">3</span> Trends Over Time</div>
+<div class="grid grid-2">
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Revenue & Volume</div><div class="chart-box"><canvas id="chartTrend"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">MoM Growth %</div><div class="chart-box"><canvas id="chartGrowth"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Cancellation Rate</div><div class="chart-box"><canvas id="chartCancel"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Refund Trend</div><div class="chart-box"><canvas id="chartRefund"></canvas></div></div>
+</div>
+
+<!-- SECTION 4: PRODUCT PERFORMANCE -->
+<div class="section-title"><span class="num">4</span> Product Performance <span class="filter-tag" id="filterTag"></span></div>
+
+<div class="filter-bar">
+  <div class="filter-group">
+    <label>Region</label>
+    <select class="filter-select" id="filterRegion" onchange="applyProductFilters()"><option value="">All Regions</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Product Line</label>
+    <select class="filter-select" id="filterBrand" onchange="applyProductFilters()"><option value="">All Product Lines</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Category</label>
+    <select class="filter-select" id="filterCategory" onchange="applyProductFilters()"><option value="">All Categories</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Origin</label>
+    <select class="filter-select" id="filterOrigin" onchange="applyProductFilters()"><option value="">All Origins</option></select>
+  </div>
+  <button class="btn-clear-filters" onclick="clearProductFilters()">Clear Filters</button>
+</div>
+
+<div class="card" style="overflow-x:auto; max-height:660px; overflow-y:auto;">
+  <table class="prod" id="prodTableEl" style="position:relative;">
+    <thead>
+      <tr>
+        <th>Product <button class="col-filter-btn" onclick="openColFilter(event,'prod',0)">▼</button></th>
+        <th>Brand <button class="col-filter-btn" onclick="openColFilter(event,'prod',1)">▼</button></th>
+        <th>Category <button class="col-filter-btn" onclick="openColFilter(event,'prod',2)">▼</button></th>
+        <th>Origin <button class="col-filter-btn" onclick="openColFilter(event,'prod',3)">▼</button></th>
+        <th class="r"># Rx <button class="col-filter-btn" onclick="openColFilter(event,'prod',4)">▼</button></th>
+        <th class="r">Volume (g) <button class="col-filter-btn" onclick="openColFilter(event,'prod',5)">▼</button></th>
+        <th class="r">Revenue € <button class="col-filter-btn" onclick="openColFilter(event,'prod',6)">▼</button></th>
+        <th class="r">Net Rev € <button class="col-filter-btn" onclick="openColFilter(event,'prod',7)">▼</button></th>
+        <th class="r">€/g <button class="col-filter-btn" onclick="openColFilter(event,'prod',8)">▼</button></th>
+        <th class="r">g/Rx <button class="col-filter-btn" onclick="openColFilter(event,'prod',9)">▼</button></th>
+      </tr>
+    </thead>
+    <tbody id="prodBody"></tbody>
+  </table>
+</div>
+
+<!-- SECTION 5: BREAKDOWNS -->
+<div class="section-title"><span class="num">5</span> Breakdowns</div>
+<div class="grid grid-2">
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Category</div><div class="chart-box"><canvas id="chartCat"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Origin</div><div class="chart-box"><canvas id="chartOrigin"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Price Tier</div><div class="chart-box"><canvas id="chartPrice"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Products / Order</div><div class="chart-box"><canvas id="chartPPO"></canvas></div></div>
+</div>
+
+<!-- SECTION 6: PATIENTS -->
+<div class="section-title"><span class="num">6</span> Patient Insights</div>
+<div class="grid grid-3">
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box"><canvas id="chartPatients"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Age Segments</div><div class="chart-box"><canvas id="chartAge"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Region</div><div class="chart-box"><canvas id="chartRegion"></canvas></div></div>
+</div>
+
+<!-- SECTION 7: PRICING -->
+<div class="section-title"><span class="num">7</span> Pricing (Avg €/g)</div>
+<div class="card"><div class="chart-box"><canvas id="chartPricing"></canvas></div></div>
+
+</div><!-- /container -->
+
+<!-- Google Sheets Column Filter Panel (shared, repositioned on open) -->
+<div class="col-filter-panel" id="colFilterPanel">
+  <div class="cfp-section">
+    <button class="cfp-sort-btn" id="cfpSortAsc"><span class="icon">↑</span> Sort A → Z / Ascending</button>
+    <button class="cfp-sort-btn" id="cfpSortDesc"><span class="icon">↓</span> Sort Z → A / Descending</button>
+  </div>
+  <div class="cfp-section">
+    <div class="cfp-title">Filter by condition</div>
+    <div class="cfp-cond-row">
+      <select class="cfp-cond-select" id="cfpCondType">
+        <option value="">None</option>
+        <option value="contains">Text contains</option>
+        <option value="not_contains">Text does not contain</option>
+        <option value="eq">Is equal to</option>
+        <option value="neq">Is not equal to</option>
+        <option value="gt">Greater than</option>
+        <option value="gte">Greater than or equal</option>
+        <option value="lt">Less than</option>
+        <option value="lte">Less than or equal</option>
+      </select>
+      <input class="cfp-cond-input" id="cfpCondVal" placeholder="Value...">
+    </div>
+  </div>
+  <div class="cfp-section">
+    <div class="cfp-title">Filter by values</div>
+    <input class="cfp-search" id="cfpSearch" placeholder="Search..." oninput="filterValueCheckboxes()">
+    <div style="margin-bottom:4px;"><label style="font-size:11px;font-weight:600;cursor:pointer;"><input type="checkbox" id="cfpSelectAll" checked onchange="toggleAllValues()"> Select All</label></div>
+    <div class="cfp-values" id="cfpValues"></div>
+  </div>
+  <div class="cfp-actions">
+    <button class="cfp-clear" onclick="clearColFilter()">Clear</button>
+    <button class="cfp-apply" onclick="applyColFilter()">OK</button>
+  </div>
+</div>
+
+<script>
+// Deal terms come from the backend (app.py MANUFACTURER_FEES dict)
+const FEE_INFO = {{ fee | tojson }};
+const SLUG = "{{ slug }}";
+const TOKEN = "{{ token }}";
+const API = `/api/brand/${SLUG}`;
+
+async function apiFetch(endpoint, extraParams = '') {
+  const s = document.getElementById('startDate').value;
+  const e = document.getElementById('endDate').value;
+  const cat = document.getElementById('globalCategory').value;
+  const catParam = cat ? `&category=${encodeURIComponent(cat)}` : '';
+  const url = `${API}/${endpoint}?token=${TOKEN}&start_date=${s}&end_date=${e}&freq=${currentFreq}${catParam}${extraParams}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+function showStatus(msg, isError = false) {
+  let bar = document.getElementById('statusBar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'statusBar'; bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:8px 20px;font-size:12px;font-weight:600;text-align:center;'; document.body.prepend(bar); }
+  bar.style.background = isError ? '#fef2f2' : '#eff6ff';
+  bar.style.color = isError ? '#991b1b' : '#1e40af';
+  bar.textContent = msg;
+  bar.style.display = 'block';
+}
+function hideStatus() { const b = document.getElementById('statusBar'); if (b) b.style.display = 'none'; }
+
+// Frequency toggle (Monthly / Weekly / Daily)
+let currentFreq = 'monthly';
+function setFreq(btn) {
+  document.querySelectorAll('.btn-freq').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFreq = btn.dataset.freq;
+  loadAll(); // Re-fetch with new frequency
+}
+
+const COLORS = { blue:'#2563eb', teal:'#0d9488', green:'#16a34a', orange:'#ea580c', purple:'#7c3aed', red:'#dc2626' };
+const PALETTE = ['#2563eb','#0d9488','#16a34a','#ea580c','#7c3aed','#dc2626','#0284c7','#b45309','#6d28d9','#059669','#e11d48','#4f46e5'];
+
+function fmt(v, pre='', suf='') { if (v == null) return '—'; return pre + Math.round(v).toLocaleString('en-US') + suf; }
+function fmtDate(d) { if (!d) return ''; const p = d.split('-'); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[parseInt(p[1])-1] + ' ' + p[0].slice(2); }
+function setChg(id, val) { const el = document.getElementById(id); if (val == null) { el.textContent = ''; return; } const p = (val*100).toFixed(1); const freqLabel = {monthly:'MoM',weekly:'WoW',daily:'DoD'}[currentFreq]||'MoM'; el.textContent = (val >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '% ' + freqLabel; el.className = 'change ' + (val >= 0 ? 'up' : 'down'); }
+
+const chartInstances = {};
+function createOrUpdate(id, cfg) { if (chartInstances[id]) chartInstances[id].destroy(); chartInstances[id] = new Chart(document.getElementById(id), cfg); }
+
+// No sample data — live API calls used instead
+
+// ============================================================
+// PRODUCT TABLE STATE
+// ============================================================
+let prodSortCol = 6, prodSortAsc = false;
+let productData = [];
+const PROD_FIELDS = ['product_name','product_brand_name','category','origin','prescriptions','volume_g','revenue_eur','net_revenue_eur','avg_eur_per_g','avg_g_per_rx'];
+
+// Column filter state per table
+const colFilters = { prod: {}, fee: {} }; // { colIndex: { values: Set, condType, condVal } }
+
+// ============================================================
+// GOOGLE SHEETS-STYLE COLUMN FILTER
+// ============================================================
+let activeFilterTable = null;
+let activeFilterCol = null;
+
+function openColFilter(event, table, colIndex) {
+  event.stopPropagation();
+  const panel = document.getElementById('colFilterPanel');
+  const btn = event.target;
+  const rect = btn.getBoundingClientRect();
+
+  activeFilterTable = table;
+  activeFilterCol = colIndex;
+
+  // Position panel below the button
+  panel.style.position = 'fixed';
+  panel.style.top = (rect.bottom + 4) + 'px';
+  panel.style.left = Math.min(rect.left, window.innerWidth - 280) + 'px';
+  panel.classList.add('open');
+
+  // Populate unique values
+  const allValues = getColumnValues(table, colIndex);
+  const existing = colFilters[table][colIndex];
+  const checkedValues = existing?.values || new Set(allValues);
+
+  const container = document.getElementById('cfpValues');
+  container.innerHTML = allValues.map(v => {
+    const checked = checkedValues.has(v) ? 'checked' : '';
+    return `<label><input type="checkbox" value="${v}" ${checked}> ${v}</label>`;
+  }).join('');
+
+  document.getElementById('cfpSelectAll').checked = checkedValues.size === allValues.length;
+  document.getElementById('cfpSearch').value = '';
+
+  // Restore condition if any
+  document.getElementById('cfpCondType').value = existing?.condType || '';
+  document.getElementById('cfpCondVal').value = existing?.condVal || '';
+
+  // Sort button handlers
+  document.getElementById('cfpSortAsc').onclick = () => { sortColumn(table, colIndex, true); closeColFilter(); };
+  document.getElementById('cfpSortDesc').onclick = () => { sortColumn(table, colIndex, false); closeColFilter(); };
+}
+
+function closeColFilter() {
+  document.getElementById('colFilterPanel').classList.remove('open');
+  activeFilterTable = null;
+  activeFilterCol = null;
+}
+
+// Close panel when clicking outside
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('colFilterPanel');
+  if (panel.classList.contains('open') && !panel.contains(e.target)) {
+    closeColFilter();
+  }
+});
+
+function getColumnValues(table, colIndex) {
+  if (table === 'prod') {
+    const field = PROD_FIELDS[colIndex];
+    return [...new Set(productData.map(r => String(r[field] ?? '—')))].sort();
+  } else if (table === 'fee') {
+    const feeFields = ['period_label','volume','revenue','fee'];
+    return [...new Set(feeDataCache.map(r => String(r[feeFields[colIndex]] ?? '')))].sort();
+  }
+  return [];
+}
+
+function filterValueCheckboxes() {
+  const q = document.getElementById('cfpSearch').value.toLowerCase();
+  document.querySelectorAll('#cfpValues label').forEach(lbl => {
+    lbl.style.display = lbl.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function toggleAllValues() {
+  const checked = document.getElementById('cfpSelectAll').checked;
+  document.querySelectorAll('#cfpValues input[type=checkbox]').forEach(cb => { if (cb.closest('label').style.display !== 'none') cb.checked = checked; });
+}
+
+function applyColFilter() {
+  const values = new Set();
+  document.querySelectorAll('#cfpValues input[type=checkbox]:checked').forEach(cb => values.add(cb.value));
+  const condType = document.getElementById('cfpCondType').value;
+  const condVal = document.getElementById('cfpCondVal').value;
+  const allValues = getColumnValues(activeFilterTable, activeFilterCol);
+
+  if (values.size === allValues.length && !condType) {
+    delete colFilters[activeFilterTable][activeFilterCol];
+  } else {
+    colFilters[activeFilterTable][activeFilterCol] = { values, condType, condVal };
+  }
+
+  // Update active indicator on button
+  updateFilterBtnStates();
+
+  if (activeFilterTable === 'prod') renderProductTable();
+  if (activeFilterTable === 'fee') renderFeeTable();
+  closeColFilter();
+}
+
+function clearColFilter() {
+  if (activeFilterTable && activeFilterCol != null) {
+    delete colFilters[activeFilterTable][activeFilterCol];
+    updateFilterBtnStates();
+    if (activeFilterTable === 'prod') renderProductTable();
+    if (activeFilterTable === 'fee') renderFeeTable();
+  }
+  closeColFilter();
+}
+
+function updateFilterBtnStates() {
+  document.querySelectorAll('#prodTableEl .col-filter-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', !!colFilters.prod[i]);
+    btn.textContent = colFilters.prod[i] ? '▼●' : '▼';
+  });
+  document.querySelectorAll('#feeTableEl .col-filter-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', !!colFilters.fee[i]);
+    btn.textContent = colFilters.fee[i] ? '▼●' : '▼';
+  });
+}
+
+function matchesCondition(val, condType, condVal) {
+  if (!condType) return true;
+  const s = String(val).toLowerCase();
+  const c = String(condVal).toLowerCase();
+  const n = parseFloat(val);
+  const cn = parseFloat(condVal);
+  switch(condType) {
+    case 'contains': return s.includes(c);
+    case 'not_contains': return !s.includes(c);
+    case 'eq': return s === c || (isFinite(n) && isFinite(cn) && n === cn);
+    case 'neq': return s !== c && !(isFinite(n) && isFinite(cn) && n === cn);
+    case 'gt': return isFinite(n) && isFinite(cn) && n > cn;
+    case 'gte': return isFinite(n) && isFinite(cn) && n >= cn;
+    case 'lt': return isFinite(n) && isFinite(cn) && n < cn;
+    case 'lte': return isFinite(n) && isFinite(cn) && n <= cn;
+  }
+  return true;
+}
+
+function sortColumn(table, colIndex, asc) {
+  if (table === 'prod') { prodSortCol = colIndex; prodSortAsc = asc; renderProductTable(); }
+  if (table === 'fee') { feeSortCol = colIndex; feeSortAsc = asc; renderFeeTable(); }
+}
+
+// ============================================================
+// PRODUCT TABLE RENDERING
+// ============================================================
+function applyProductFilters() {
+  const region   = document.getElementById('filterRegion').value;
+  const brand    = document.getElementById('filterBrand').value;
+  const category = document.getElementById('filterCategory').value;
+  const origin   = document.getElementById('filterOrigin').value;
+  const active = [region, brand, category, origin].filter(Boolean);
+  document.getElementById('filterTag').textContent = active.length > 0 ? `— filtered by: ${active.join(', ')}` : '';
+  // If region is set, we need server-side filtering (BigQuery JOIN).
+  // For brand/category/origin we can do client-side, but server-side is cleaner.
+  if (region) {
+    reloadProducts();
+  } else {
+    renderProductTable();
+  }
+}
+
+function clearProductFilters() {
+  document.getElementById('filterRegion').value = '';
+  document.getElementById('filterBrand').value = '';
+  document.getElementById('filterCategory').value = '';
+  document.getElementById('filterOrigin').value = '';
+  document.getElementById('filterTag').textContent = '';
+  colFilters.prod = {};
+  updateFilterBtnStates();
+  renderProductTable();
+}
+
+function renderProductTable() {
+  const brand    = document.getElementById('filterBrand')?.value || '';
+  const category = document.getElementById('filterCategory')?.value || '';
+  const origin   = document.getElementById('filterOrigin')?.value || '';
+
+  let filtered = productData;
+  if (brand)    filtered = filtered.filter(p => p.product_brand_name === brand);
+  if (category) filtered = filtered.filter(p => p.category === category);
+  if (origin)   filtered = filtered.filter(p => p.origin === origin);
+
+  // Apply Google Sheets column filters
+  for (const [ci, f] of Object.entries(colFilters.prod)) {
+    const field = PROD_FIELDS[ci];
+    filtered = filtered.filter(r => {
+      const v = String(r[field] ?? '—');
+      if (f.values && !f.values.has(v)) return false;
+      if (f.condType && !matchesCondition(r[field], f.condType, f.condVal)) return false;
+      return true;
+    });
+  }
+
+  const sorted = [...filtered].sort((a, b) => {
+    const f = PROD_FIELDS[prodSortCol];
+    let va = a[f] ?? '', vb = b[f] ?? '';
+    if (typeof va === 'string') return prodSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    return prodSortAsc ? va - vb : vb - va;
+  });
+
+  const tbody = document.getElementById('prodBody');
+  tbody.innerHTML = sorted.map(p => {
+    const catClass = (p.category||'').toLowerCase().includes('flower') ? 'fl' : ((p.category||'').toLowerCase().includes('extract') ? 'ex' : 'ot');
+    return `<tr>
+      <td style="font-weight:500;max-width:280px">${p.product_name||''}</td>
+      <td>${p.product_brand_name||''}</td>
+      <td><span class="tag ${catClass}">${p.category||'—'}</span></td>
+      <td>${p.origin||'—'}</td>
+      <td class="r">${fmt(p.prescriptions)}</td>
+      <td class="r">${fmt(p.volume_g)}</td>
+      <td class="r">${fmt(p.revenue_eur,'€')}</td>
+      <td class="r">${fmt(p.net_revenue_eur,'€')}</td>
+      <td class="r">${p.avg_eur_per_g!=null?'€'+parseFloat(p.avg_eur_per_g).toFixed(2):'—'}</td>
+      <td class="r">${p.avg_g_per_rx!=null?parseFloat(p.avg_g_per_rx).toFixed(1):'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function populateSelect(id, options, allLabel) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${allLabel}</option>` + options.map(o => `<option value="${o}">${o}</option>`).join('');
+  if (cur && options.includes(cur)) sel.value = cur;
+}
+
+// ============================================================
+// FEE TABLE STATE & RENDERING
+// ============================================================
+let feeDataCache = [];
+let feeSortCol = null, feeSortAsc = true;
+
+function renderFeeTable() {
+  let data = [...feeDataCache];
+
+  // Apply Google Sheets column filters
+  const feeFields = ['period_label','volume','revenue','fee'];
+  for (const [ci, f] of Object.entries(colFilters.fee)) {
+    const field = feeFields[ci];
+    data = data.filter(r => {
+      const v = String(r[field] ?? '');
+      if (f.values && !f.values.has(v)) return false;
+      if (f.condType && !matchesCondition(r[field], f.condType, f.condVal)) return false;
+      return true;
+    });
+  }
+
+  // Sort
+  if (feeSortCol != null) {
+    const field = feeFields[feeSortCol];
+    data.sort((a, b) => {
+      let va = a[field], vb = b[field];
+      if (typeof va === 'string') return feeSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return feeSortAsc ? va - vb : vb - va;
+    });
+  }
+
+  const rateDisplay = FEE_INFO.label || '—';
+  let totalVol = 0, totalRev = 0, totalFee = 0;
+  const tbody = document.getElementById('feeBody');
+
+  tbody.innerHTML = data.map(r => {
+    totalVol += r.volume;
+    totalRev += r.revenue;
+    totalFee += r.fee;
+    return `<tr>
+      <td>${r.period_label}</td>
+      <td class="r">${Math.round(r.volume).toLocaleString('en-US')}</td>
+      <td class="r">€${Math.round(r.revenue).toLocaleString('en-US')}</td>
+      <td class="r" style="color:#888">${rateDisplay}</td>
+      <td class="r" style="font-weight:600;color:#92400e">€${r.fee.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('feeTotalVol').textContent = Math.round(totalVol).toLocaleString('en-US');
+  document.getElementById('feeTotalRev').textContent = '€' + Math.round(totalRev).toLocaleString('en-US');
+  document.getElementById('feeTotalAmt').textContent = '€' + totalFee.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+// ============================================================
+// RENDER FUNCTIONS
+// ============================================================
+function renderSummary(data) {
+  const c = data.current||{}, g = data.growth||{};
+  document.getElementById('k-rx').textContent = fmt(c.prescriptions);
+  document.getElementById('k-rev').textContent = fmt(c.revenue_eur,'€');
+  document.getElementById('k-vol').textContent = fmt(c.sales_volume_g,'',' g');
+  document.getElementById('k-net').textContent = fmt(c.net_revenue_eur,'€');
+  document.getElementById('k-cancel').textContent = c.cancellation_rate!=null?(c.cancellation_rate*100).toFixed(1)+'%':'—';
+  document.getElementById('k-gpx').textContent = c.avg_g_per_prescription!=null?parseFloat(c.avg_g_per_prescription).toFixed(1)+' g':'—';
+  document.getElementById('k-epg').textContent = c.avg_eur_per_g!=null?'€'+parseFloat(c.avg_eur_per_g).toFixed(2):'—';
+  document.getElementById('k-ppo').textContent = c.avg_products_per_order!=null?parseFloat(c.avg_products_per_order).toFixed(1):'—';
+  document.getElementById('k-pat').textContent = fmt(c.total_patients);
+  setChg('k-rx-chg',g.prescriptions); setChg('k-rev-chg',g.revenue); setChg('k-vol-chg',g.volume); setChg('k-net-chg',g.net_revenue);
+}
+
+function renderDealTerms() {
+  const typeNames = { per_gram:'Per-Gram Fee', percentage:'Percentage Fee', fixed:'Fixed Monthly', advance:'Revenue Advance' };
+  document.getElementById('dealValue').textContent = FEE_INFO.label;
+  document.getElementById('dealDesc').textContent = FEE_INFO.desc;
+  document.getElementById('dealType').textContent = typeNames[FEE_INFO.type] || FEE_INFO.type;
+  document.getElementById('dealCalc').textContent = 'Since ' + FEE_INFO.effective_date;
+}
+
+function renderFee(summary, trends) {
+  const feeAmt = summary.fee?.amount;
+  const rows = trends.data||[];
+
+  // Chart
+  createOrUpdate('chartFee', {
+    type:'bar',
+    data:{ labels:rows.map(r=>fmtDate(r.period)), datasets:[{ label:'Fee (€)', data:rows.map(r=>Math.round(r.fee_amount||0)), backgroundColor:COLORS.orange+'88', borderColor:COLORS.orange, borderWidth:1 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+(v/1000).toFixed(1)+'k'}}} }
+  });
+
+  // Build fee data cache for the breakdown table
+  feeDataCache = rows.map(r => ({
+    period_label: fmtDate(r.period),
+    volume: r.sales_volume_g||0,
+    revenue: r.revenue_eur||0,
+    fee: r.fee_amount||0,
+  }));
+  feeSortCol = null;
+  colFilters.fee = {};
+  updateFilterBtnStates();
+  renderFeeTable();
+}
+
+function renderTrends(data) {
+  const rows = data.data||[], labels = rows.map(r=>fmtDate(r.period));
+  createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:'Volume (g)',data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:'Grams'},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
+  const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
+  createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'Revenue %',data:gR,borderColor:COLORS.blue,borderWidth:2,pointRadius:3,tension:0.3},{label:'Volume %',data:gV,borderColor:COLORS.teal,borderWidth:2,pointRadius:3,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
+  createOrUpdate('chartCancel',{type:'line',data:{labels,datasets:[{label:'Cancel %',data:rows.map(r=>r.cancellation_rate!=null?(r.cancellation_rate*100):null),borderColor:COLORS.red,borderWidth:2,pointRadius:4,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v.toFixed(1)+'%'}}}}});
+  createOrUpdate('chartRefund',{type:'bar',data:{labels,datasets:[{label:'Refund €',data:rows.map(r=>r.refund_eur),backgroundColor:COLORS.orange+'66',borderColor:COLORS.orange,borderWidth:1,yAxisID:'y'},{label:'Refund %',data:rows.map(r=>r.refund_rate!=null?(r.refund_rate*100):null),type:'line',borderColor:COLORS.red,borderWidth:2,pointRadius:3,yAxisID:'y1'}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',ticks:{callback:v=>'€'+(v/1000).toFixed(1)+'k'}},y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>v.toFixed(1)+'%'}}}}});
+}
+
+function renderProducts(data) {
+  productData = data.data||[];
+  const brands = [...new Set(productData.map(p=>p.product_brand_name).filter(Boolean))].sort();
+  const categories = [...new Set(productData.map(p=>p.category).filter(Boolean))].sort();
+  const origins = [...new Set(productData.map(p=>p.origin).filter(Boolean))].sort();
+  populateSelect('filterBrand', brands, 'All Product Lines');
+  populateSelect('filterCategory', categories, 'All Categories');
+  populateSelect('filterOrigin', origins, 'All Origins');
+  renderProductTable();
+}
+
+function renderBreakdowns(data) {
+  const cats=data.categories||[];
+  createOrUpdate('chartCat',{type:'doughnut',data:{labels:cats.map(c=>c.category||'Unknown'),datasets:[{data:cats.map(c=>c.net_revenue_eur),backgroundColor:PALETTE.slice(0,cats.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}});
+  const ori=data.origins||[];
+  createOrUpdate('chartOrigin',{type:'bar',data:{labels:ori.map(o=>o.origin),datasets:[{label:'Net Rev €',data:ori.map(o=>o.net_revenue_eur),backgroundColor:PALETTE.slice(0,ori.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  const pt=data.price_tiers||[];
+  createOrUpdate('chartPrice',{type:'bar',data:{labels:pt.map(p=>p.price_tier),datasets:[{label:'Net Rev €',data:pt.map(p=>p.net_revenue_eur),backgroundColor:[COLORS.green,COLORS.blue,COLORS.teal,COLORS.purple,COLORS.orange]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  const ppo=data.products_per_order||[];
+  createOrUpdate('chartPPO',{type:'bar',data:{labels:ppo.map(p=>p.products_per_order),datasets:[{label:'# Orders',data:ppo.map(p=>p.order_count),backgroundColor:COLORS.purple+'88',borderColor:COLORS.purple,borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+}
+
+function renderPatients(data) {
+  const nr=data.new_returning||[];
+  const periods=[...new Set(nr.map(r=>r.period))].sort();
+  const nd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='new')||{}).patient_count||0);
+  const rd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='returning')||{}).patient_count||0);
+  createOrUpdate('chartPatients',{type:'bar',data:{labels:periods.map(fmtDate),datasets:[{label:'New',data:nd,backgroundColor:COLORS.blue+'88',borderColor:COLORS.blue,borderWidth:1,stack:'a'},{label:'Returning',data:rd,backgroundColor:COLORS.green+'88',borderColor:COLORS.green,borderWidth:1,stack:'a'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true}}}});
+  const age=data.age_segments||[];
+  createOrUpdate('chartAge',{type:'bar',data:{labels:age.map(a=>a.age_segment),datasets:[{label:'Patients',data:age.map(a=>a.patient_count),backgroundColor:PALETTE.slice(0,age.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+  const reg=data.regions||[];
+  populateSelect('filterRegion', reg.map(r=>r.region).filter(Boolean).sort(), 'All Regions');
+  if(reg.length>0) createOrUpdate('chartRegion',{type:'bar',data:{labels:reg.map(r=>r.region),datasets:[{label:'Patients',data:reg.map(r=>r.patient_count),backgroundColor:PALETTE.slice(0,reg.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}}}});
+}
+
+function renderPricing(data) {
+  const rows=data.data||[];
+  createOrUpdate('chartPricing',{type:'line',data:{labels:rows.map(r=>fmtDate(r.period)),datasets:[{label:'Avg €/g',data:rows.map(r=>r.avg_eur_per_g),borderColor:COLORS.purple,backgroundColor:COLORS.purple+'22',borderWidth:2,pointRadius:4,fill:true,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'€'+v.toFixed(2)}}}}});
+}
+
+// ============================================================
+// LOAD ALL — async, fetches live data from BigQuery via API
+// ============================================================
+async function loadAll() {
+  const btn = document.getElementById('btnApply');
+  btn.disabled = true;
+  showStatus('Loading data from BigQuery…');
+  try {
+    const [summary, trends, products, breakdowns, patients, pricing] = await Promise.all([
+      apiFetch('summary'),
+      apiFetch('trends'),
+      apiFetch('products'),
+      apiFetch('breakdowns'),
+      apiFetch('patients'),
+      apiFetch('pricing'),
+    ]);
+    renderDealTerms();
+    renderSummary(summary);
+    renderTrends(trends);
+    renderProducts(products);
+    renderBreakdowns(breakdowns);
+    renderPatients(patients);
+    renderPricing(pricing);
+    renderFee(summary, trends);
+    document.getElementById('lastUpdated').textContent = new Date().toLocaleString('en-US');
+    hideStatus();
+  } catch (err) {
+    showStatus('Error loading data: ' + err.message, true);
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Product filter with server-side region support
+async function reloadProducts() {
+  const region   = document.getElementById('filterRegion').value;
+  const brand    = document.getElementById('filterBrand').value;
+  const category = document.getElementById('filterCategory').value;
+  const origin   = document.getElementById('filterOrigin').value;
+  let extra = '';
+  if (region)   extra += `&region=${encodeURIComponent(region)}`;
+  if (brand)    extra += `&brand=${encodeURIComponent(brand)}`;
+  if (category) extra += `&category=${encodeURIComponent(category)}`;
+  if (origin)   extra += `&origin=${encodeURIComponent(origin)}`;
+  try {
+    const data = await apiFetch('products', extra);
+    renderProducts(data);
+  } catch (err) {
+    console.error('Product reload error:', err);
+  }
+}
+
+async function loadCategories() {
+  try {
+    const res = await fetch(`${API}/categories?token=${TOKEN}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const sel = document.getElementById('globalCategory');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All Categories</option>';
+    (data.categories || []).forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c.charAt(0).toUpperCase() + c.slice(1);
+      if (c === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (e) { console.error('Failed to load categories:', e); }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  await loadCategories();
+  loadAll();
+  document.getElementById('startDate').addEventListener('change', () => loadAll());
+  document.getElementById('endDate').addEventListener('change', () => loadAll());
+});
+</script>
+</body>
+</html>

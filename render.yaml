@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: htv-brand-dashboard
+    runtime: docker
+    plan: starter
+    envVars:
+      - key: GOOGLE_SA_KEY_JSON
+        sync: false   # Set manually in Render dashboard
+      - key: BQ_DATASET
+        value: htv-data-foundation-prod.datamarts
+      - key: TOKEN_CANNAMEDICAL
+        generateValue: true
+      - key: TOKEN_FOUR20
+        generateValue: true
+      - key: TOKEN_AURORA
+        generateValue: true
+      - key: TOKEN_DEMECAN
+        generateValue: true
+      - key: TOKEN_TILRAY
+        generateValue: true
+      - key: TOKEN_ENUA
+        generateValue: true
+      - key: TOKEN_ALEPHSANA
+        generateValue: true
+      - key: TOKEN_IUVO
+        generateValue: true
