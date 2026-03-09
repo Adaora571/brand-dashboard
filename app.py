@@ -6,7 +6,7 @@ Queries BigQuery live data and serves per-manufacturer dashboards.
   edit the MANUFACTURER_FEES dict below. No other code changes needed.
 """
 
-import os, json, hashlib, hmac, logging
+import os, json, hashlib, hmac, logging, asyncio, time
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,6 +16,31 @@ from google.api_core import exceptions as gcp_exceptions
 from google.oauth2 import service_account
 
 logger = logging.getLogger("brand-dashboard")
+
+# ============================================================
+# IN-MEMORY CACHE (TTL-based)
+# ============================================================
+CACHE_TTL = 300  # 5 minutes
+_cache: dict[str, tuple[float, any]] = {}
+
+
+def cache_key(endpoint: str, **kwargs) -> str:
+    """Build a deterministic cache key from endpoint + params."""
+    parts = sorted(f"{k}={v}" for k, v in kwargs.items() if v)
+    return f"{endpoint}|{'|'.join(parts)}"
+
+
+def cache_get(key: str):
+    """Return cached value if still fresh, else None."""
+    entry = _cache.get(key)
+    if entry and (time.time() - entry[0]) < CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def cache_set(key: str, value):
+    """Store a value in cache with current timestamp."""
+    _cache[key] = (time.time(), value)
 
 
 class BigQueryError(Exception):
@@ -222,6 +247,11 @@ def run_query(sql: str, params: list = None):
         )
 
 
+async def run_query_async(sql: str, params: list = None):
+    """Run a BigQuery query on a thread so multiple can execute in parallel."""
+    return await asyncio.to_thread(run_query, sql, params)
+
+
 def date_params(start_date: str, end_date: str, category: str = ""):
     """Build date + category filter SQL + params."""
     clauses, params = [], []
@@ -263,6 +293,14 @@ async def api_summary(
     category: str = "", compare_start: str = "", compare_end: str = "",
 ):
     mfg_name = verify_access(slug, token)
+
+    # Check cache first
+    ck = cache_key("summary", slug=slug, s=start_date, e=end_date, cat=category,
+                   cs=compare_start, ce=compare_end)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     date_where, date_p = date_params(start_date, end_date, category)
 
     # If the frontend doesn't supply explicit compare dates, fall back to
@@ -336,7 +374,7 @@ async def api_summary(
             return None
         return (curr - prev) / prev
 
-    return {
+    result = {
         "current": {
             "prescriptions": r.get("prescriptions"),
             "revenue_eur": r.get("revenue_eur"),
@@ -356,6 +394,8 @@ async def api_summary(
         },
         "fee": {"amount": fee_amount},
     }
+    cache_set(ck, result)
+    return result
 
 
 # ============================================================
@@ -364,6 +404,12 @@ async def api_summary(
 @app.get("/api/brand/{slug}/trends")
 async def api_trends(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
     mfg_name = verify_access(slug, token)
+
+    ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     date_where, date_p = date_params(start_date, end_date, category)
 
     sql = f"""
@@ -388,7 +434,9 @@ async def api_trends(slug: str, token: str, start_date: str = "", end_date: str 
     for r in rows:
         r["fee_amount"] = calc_fee(fee, r.get("sales_volume_g", 0), r.get("net_revenue_eur", 0))
 
-    return {"data": rows}
+    result = {"data": rows}
+    cache_set(ck, result)
+    return result
 
 
 # ============================================================
@@ -400,6 +448,13 @@ async def api_products(
     region: str = "", brand: str = "", category: str = "", origin: str = "",
 ):
     mfg_name = verify_access(slug, token)
+
+    ck = cache_key("products", slug=slug, s=start_date, e=end_date,
+                   region=region, brand=brand, category=category, origin=origin)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     date_where, date_p = date_params(start_date, end_date)
 
     extra_where = ""
@@ -440,7 +495,9 @@ async def api_products(
     ORDER BY revenue_eur DESC
     """
     params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p + extra_params
-    return {"data": run_query(sql, params)}
+    result = {"data": run_query(sql, params)}
+    cache_set(ck, result)
+    return result
 
 
 # ============================================================
@@ -449,6 +506,13 @@ async def api_products(
 @app.get("/api/brand/{slug}/breakdowns")
 async def api_breakdowns(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
     mfg_name = verify_access(slug, token)
+
+    # Check cache first
+    ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     date_where, date_p = date_params(start_date, end_date, category)
     base_params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
 
@@ -493,12 +557,21 @@ async def api_breakdowns(slug: str, token: str, start_date: str = "", end_date: 
       GROUP BY 1
     ) GROUP BY 1 ORDER BY 1
     """
-    return {
-        "categories": run_query(cat_sql, list(base_params)),
-        "origins": run_query(ori_sql, list(base_params)),
-        "price_tiers": run_query(pt_sql, list(base_params)),
-        "products_per_order": run_query(ppo_sql, list(base_params)),
+    # Run all 4 queries in parallel instead of sequentially
+    cats, oris, pts, ppos = await asyncio.gather(
+        run_query_async(cat_sql, list(base_params)),
+        run_query_async(ori_sql, list(base_params)),
+        run_query_async(pt_sql, list(base_params)),
+        run_query_async(ppo_sql, list(base_params)),
+    )
+    result = {
+        "categories": cats,
+        "origins": oris,
+        "price_tiers": pts,
+        "products_per_order": ppos,
     }
+    cache_set(ck, result)
+    return result
 
 
 # ============================================================
@@ -507,6 +580,12 @@ async def api_breakdowns(slug: str, token: str, start_date: str = "", end_date: 
 @app.get("/api/brand/{slug}/patients")
 async def api_patients(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
     mfg_name = verify_access(slug, token)
+
+    ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     date_where, date_p = date_params(start_date, end_date, category)
     base_params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
 
@@ -555,11 +634,19 @@ async def api_patients(slug: str, token: str, start_date: str = "", end_date: st
       AND o.shipping_address.region IS NOT NULL
     GROUP BY 1 ORDER BY patient_count DESC LIMIT 15
     """
-    return {
-        "new_returning": run_query(nr_sql, list(base_params)),
-        "age_segments": run_query(age_sql, list(base_params)),
-        "regions": run_query(reg_sql, list(base_params)),
+    # Run all 3 queries in parallel instead of sequentially
+    nr, ages, regs = await asyncio.gather(
+        run_query_async(nr_sql, list(base_params)),
+        run_query_async(age_sql, list(base_params)),
+        run_query_async(reg_sql, list(base_params)),
+    )
+    result = {
+        "new_returning": nr,
+        "age_segments": ages,
+        "regions": regs,
     }
+    cache_set(ck, result)
+    return result
 
 
 # ============================================================
@@ -568,6 +655,12 @@ async def api_patients(slug: str, token: str, start_date: str = "", end_date: st
 @app.get("/api/brand/{slug}/pricing")
 async def api_pricing(slug: str, token: str, start_date: str = "", end_date: str = "", category: str = ""):
     mfg_name = verify_access(slug, token)
+
+    ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
     date_where, date_p = date_params(start_date, end_date, category)
 
     sql = f"""
@@ -580,7 +673,9 @@ async def api_pricing(slug: str, token: str, start_date: str = "", end_date: str
     GROUP BY period ORDER BY period
     """
     params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
-    return {"data": run_query(sql, params)}
+    result = {"data": run_query(sql, params)}
+    cache_set(ck, result)
+    return result
 
 
 # ============================================================
