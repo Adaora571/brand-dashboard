@@ -38,6 +38,17 @@ async def bigquery_error_handler(request: Request, exc: BigQueryError):
         content={"error": exc.message, "status": "unavailable"},
     )
 
+@app.exception_handler(Exception)
+async def general_error_handler(request: Request, exc: Exception):
+    """Catch-all: return the traceback so we can debug remotely."""
+    import traceback
+    tb = traceback.format_exc()
+    logger.error("Unhandled error: %s\n%s", exc, tb)
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc), "traceback": tb},
+    )
+
 # ============================================================
 # BIGQUERY CONNECTION
 # Supports three auth modes (checked in order):
