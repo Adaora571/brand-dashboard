@@ -73,7 +73,6 @@ MANUFACTURER_TOKENS = {
     "four20":        os.getenv("TOKEN_FOUR20",         "f20_demo_token_2025"),
     "aurora":        os.getenv("TOKEN_AURORA",          "au_demo_token_2025"),
     "demecan":       os.getenv("TOKEN_DEMECAN",         "dm_demo_token_2025"),
-    "tilray":        os.getenv("TOKEN_TILRAY",          "tl_demo_token_2025"),
     "enua":          os.getenv("TOKEN_ENUA",            "en_demo_token_2025"),
     "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "al_demo_token_2025"),
     "iuvo":          os.getenv("TOKEN_IUVO",            "iv_demo_token_2025"),
@@ -86,7 +85,6 @@ MANUFACTURER_BQ_NAMES = {
     "four20":        "Four 20 Pharma",
     "aurora":        "Aurora",
     "demecan":       "Demecan",
-    "tilray":        "Tilray",
     "enua":          "enua",
     "alephsana":     "AlephSana",
     "iuvo":          "IUVO",
@@ -121,12 +119,6 @@ MANUFACTURER_FEES = {
         "type": "fixed", "rate": 50000,
         "label": "€50,000 / month", "desc": "Fixed monthly fee",
         "effective_date": "2024-03-01",
-        "notes": "",
-    },
-    "tilray": {
-        "type": "per_gram", "rate": 0.50,
-        "label": "€0.50 / g", "desc": "Per-gram transaction fee",
-        "effective_date": "2024-06-01",
         "notes": "",
     },
     "enua": {
