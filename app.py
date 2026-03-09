@@ -77,6 +77,7 @@ MANUFACTURER_TOKENS = {
     "enua":          os.getenv("TOKEN_ENUA",            "en_demo_token_2025"),
     "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "al_demo_token_2025"),
     "iuvo":          os.getenv("TOKEN_IUVO",            "iv_demo_token_2025"),
+    "avaay":         os.getenv("TOKEN_AVAAY",           "av_demo_token_2025"),
 }
 
 # Slug → actual BigQuery product_manufacturer_name
@@ -89,6 +90,7 @@ MANUFACTURER_BQ_NAMES = {
     "enua":          "enua",
     "alephsana":     "AlephSana",
     "iuvo":          "IUVO",
+    "avaay":         "avaay Medical",
 }
 
 # ============================================================
@@ -145,6 +147,14 @@ MANUFACTURER_FEES = {
         "effective_date": "2025-03-01",
         "notes": "",
     },
+    "avaay": {
+        "type": "advance", "rate": 0.375,
+        "label": "€300k prepaid (800 kg)", "desc": "Advance — €300,000 for 800 kg",
+        "effective_date": "2025-01-01",
+        "notes": "Prepaid 800 kg; new contract after volume fulfilled",
+        "advance_total_eur": 300000,
+        "advance_total_kg": 800,
+    },
 }
 # ============================================================
 
@@ -166,6 +176,10 @@ def calc_fee(fee_info: dict, volume_g: float, revenue: float, months: int = 1) -
         return (revenue or 0) * r
     elif t == "fixed":
         return r * months
+    elif t == "advance":
+        # For advance/prepaid deals, the fee is the effective per-gram rate
+        # applied to actual volume sold in the period
+        return (volume_g or 0) * r
     return 0
 
 
