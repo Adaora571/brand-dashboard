@@ -18,8 +18,7 @@
   .header .subtitle { color:#94a3b8; font-size:12px; margin-top:2px; }
   .header-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .header-controls label { font-size:11px; color:#94a3b8; font-weight:500; }
-  .header-controls input[type=date] { background:#334155; color:#fff; border:1px solid #475569; border-radius:20px; padding:7px 14px; font-size:12px; font-family:inherit; outline:none; -webkit-appearance:none; }
-  .header-controls input[type=date]::-webkit-calendar-picker-indicator { filter:invert(1); opacity:0.6; }
+  /* Old header date inputs removed — now using date picker panel */
   .btn-apply { background:#16a34a; color:#fff; border:none; border-radius:20px; padding:8px 22px; font-size:12px; font-weight:600; cursor:pointer; transition:background 0.15s; }
   .btn-apply:hover { background:#15803d; }
   .btn-freq { background:transparent; color:#cbd5e1; border:1px solid #475569; border-radius:20px; padding:7px 18px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.15s; }
@@ -65,7 +64,7 @@
   .date-row input[type=date] {
     flex:1; border:1px solid var(--border); border-radius:6px;
     padding:8px 10px; font-size:12px; font-family:inherit; outline:none;
-    color:var(--text);
+    color:var(--text); background:#fff;
   }
   .date-row input[type=date]:focus { border-color:var(--blue); box-shadow:0 0 0 2px rgba(37,99,235,0.1); }
   .compare-section { border-top:1px solid var(--border); padding-top:14px; margin-top:6px; }
