@@ -237,6 +237,7 @@
     <select class="filter-select" id="filterOrigin" onchange="applyProductFilters()"><option value="">All Origins</option></select>
   </div>
   <button class="btn-clear-filters" onclick="clearProductFilters()">Clear Filters</button>
+  <button class="btn-export-csv" onclick="exportProductCSV()" style="margin-left:auto; padding:6px 16px; background:#2e7d32; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">⬇ Export CSV</button>
 </div>
 
 <div class="card" style="overflow-x:auto; max-height:660px; overflow-y:auto;">
@@ -375,6 +376,48 @@ const PROD_FIELDS = ['product_name','product_brand_name','category','origin','pr
 
 // Column filter state per table
 const colFilters = { prod: {}, fee: {} }; // { colIndex: { values: Set, condType, condVal } }
+
+function exportProductCSV() {
+  const headers = ['Product','Brand','Category','Origin','Prescriptions','Volume (g)','Revenue (€)','Net Revenue (€)','Avg €/g','Avg g/Rx'];
+  const fields = PROD_FIELDS;
+
+  // Use currently filtered/sorted data from the visible table
+  const brand    = document.getElementById('filterBrand')?.value || '';
+  const category = document.getElementById('filterCategory')?.value || '';
+  const origin   = document.getElementById('filterOrigin')?.value || '';
+  let filtered = productData;
+  if (brand)    filtered = filtered.filter(p => p.product_brand_name === brand);
+  if (category) filtered = filtered.filter(p => p.category === category);
+  if (origin)   filtered = filtered.filter(p => p.origin === origin);
+  for (const [ci, f] of Object.entries(colFilters.prod)) {
+    const field = fields[ci];
+    filtered = filtered.filter(r => {
+      const v = String(r[field] ?? '');
+      if (f.values && !f.values.has(v)) return false;
+      if (f.condType && !matchesCondition(r[field], f.condType, f.condVal)) return false;
+      return true;
+    });
+  }
+
+  const csvRows = [headers.join(',')];
+  filtered.forEach(p => {
+    const row = fields.map(f => {
+      let val = p[f] ?? '';
+      if (typeof val === 'number') val = parseFloat(val.toFixed(2));
+      val = String(val).replace(/"/g, '""');
+      return `"${val}"`;
+    });
+    csvRows.push(row.join(','));
+  });
+
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${SLUG}_products_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ============================================================
 // GOOGLE SHEETS-STYLE COLUMN FILTER
