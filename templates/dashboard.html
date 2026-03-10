@@ -27,8 +27,8 @@
   .brand-logo { height:36px; max-width:180px; object-fit:contain; }
   .brand-logo.invert { filter:brightness(0) invert(1); }
   .brand-title-row { display:flex; align-items:center; gap:14px; }
-  .logout-btn { color:rgba(255,255,255,0.6); padding:6px; border-radius:6px; transition:all 0.15s; text-decoration:none; display:flex; align-items:center; }
-  .logout-btn:hover { color:#fff; background:rgba(255,255,255,0.1); }
+  .logout-btn { color:rgba(255,255,255,0.55); padding:6px 12px; border-radius:8px; transition:all 0.2s; text-decoration:none; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; }
+  .logout-btn:hover { color:#fff; background:rgba(255,255,255,0.12); }
   .header-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .header-controls label { font-size:11px; color:rgba(255,255,255,0.6); font-weight:500; }
   /* Old header date inputs removed — now using date picker panel */
@@ -236,7 +236,8 @@
     <div class="subtitle">HTV Data Foundation &bull; Live data &bull; <span id="lastUpdated">—</span></div>
   </div>
   <a href="/brand/{{ slug }}/logout" class="logout-btn" title="Sign out">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    Sign out
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
     </svg>
   </a>
