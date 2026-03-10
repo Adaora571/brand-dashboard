@@ -10,6 +10,7 @@ import os, json, hashlib, hmac, logging, asyncio, time, secrets
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from google.cloud import bigquery
@@ -54,6 +55,23 @@ class BigQueryError(Exception):
 
 app = FastAPI(title="HTV Brand Dashboard")
 templates = Jinja2Templates(directory="templates")
+
+# Mount static files (logos, etc.)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ============================================================
+# BRAND CONFIG — colours + logo paths per manufacturer
+# ============================================================
+BRAND_CONFIG = {
+    "cannamedical": {"color": "#568E2F", "logo": "/static/logos/cannamedical.svg", "name": "Cannamedical"},
+    "four20":       {"color": "#016269", "logo": "/static/logos/four20.svg",       "name": "Four 20 Pharma"},
+    "aurora":       {"color": "#052155", "logo": "/static/logos/aurora.svg",       "name": "Aurora"},
+    "demecan":      {"color": "#002D4E", "logo": "/static/logos/demecan.svg",      "name": "Demecan"},
+    "enua":         {"color": "#193032", "logo": "/static/logos/enua.svg",         "name": "enua"},
+    "alephsana":    {"color": "#103C3A", "logo": "/static/logos/alephsana.svg",    "name": "AlephSana"},
+    "iuvo":         {"color": "#000000", "logo": "/static/logos/iuvo.svg",         "name": "IUVO"},
+    "avaay":        {"color": "#181A1B", "logo": "/static/logos/avaay.svg",        "name": "avaay"},
+}
 
 # ============================================================
 # SESSION & SECURITY CONFIG
@@ -355,11 +373,13 @@ async def brand_page(request: Request, slug: str):
         })
 
     fee = MANUFACTURER_FEES.get(slug, {})
+    brand = BRAND_CONFIG.get(slug, {"color": "#1e293b", "logo": "", "name": slug})
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "slug": slug,
         "manufacturer_name": MANUFACTURER_BQ_NAMES[slug],
         "fee": fee,
+        "brand": brand,
     })
 
 

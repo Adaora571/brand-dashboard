@@ -13,33 +13,35 @@
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:var(--bg); color:var(--text); font-size:13px; }
-  .header { background:linear-gradient(135deg,#1e293b 0%,#334155 100%); color:#fff; padding:18px 32px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+  .header { background:linear-gradient(135deg, {{ brand.color }} 0%, {{ brand.color }}dd 100%); color:#fff; padding:18px 32px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
   .header h1 { font-size:22px; font-weight:700; }
-  .header .subtitle { color:#94a3b8; font-size:12px; margin-top:2px; }
-  .logout-btn { color:#94a3b8; padding:6px; border-radius:6px; transition:all 0.15s; text-decoration:none; display:flex; align-items:center; }
+  .header .subtitle { color:rgba(255,255,255,0.65); font-size:12px; margin-top:2px; }
+  .brand-logo { height:32px; margin-right:10px; filter:brightness(0) invert(1); }
+  .brand-title-row { display:flex; align-items:center; gap:0; }
+  .logout-btn { color:rgba(255,255,255,0.6); padding:6px; border-radius:6px; transition:all 0.15s; text-decoration:none; display:flex; align-items:center; }
   .logout-btn:hover { color:#fff; background:rgba(255,255,255,0.1); }
   .header-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .header-controls label { font-size:11px; color:#94a3b8; font-weight:500; }
+  .header-controls label { font-size:11px; color:rgba(255,255,255,0.6); font-weight:500; }
   /* Old header date inputs removed — now using date picker panel */
   .btn-apply { background:#16a34a; color:#fff; border:none; border-radius:20px; padding:8px 22px; font-size:12px; font-weight:600; cursor:pointer; transition:background 0.15s; }
   .btn-apply:hover { background:#15803d; }
-  .btn-freq { background:transparent; color:#cbd5e1; border:1px solid #475569; border-radius:20px; padding:7px 18px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.15s; }
-  .btn-freq:hover { border-color:#94a3b8; color:#fff; }
-  .btn-freq.active { background:#475569; color:#fff; border-color:#64748b; }
-  .last-updated { font-size:11px; color:#94a3b8; white-space:nowrap; }
+  .btn-freq { background:transparent; color:rgba(255,255,255,0.75); border:1px solid rgba(255,255,255,0.25); border-radius:20px; padding:7px 18px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.15s; }
+  .btn-freq:hover { border-color:rgba(255,255,255,0.5); color:#fff; }
+  .btn-freq.active { background:rgba(255,255,255,0.2); color:#fff; border-color:rgba(255,255,255,0.4); }
+  .last-updated { font-size:11px; color:rgba(255,255,255,0.6); white-space:nowrap; }
 
   /* ======================== */
   /* SHOPIFY-STYLE DATE PICKER */
   /* ======================== */
   .date-trigger {
-    background:#334155; color:#fff; border:1px solid #475569; border-radius:20px;
+    background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.25); border-radius:20px;
     padding:8px 16px; font-size:12px; font-family:inherit; cursor:pointer;
     display:flex; align-items:center; gap:8px; transition:all 0.15s;
   }
-  .date-trigger:hover { border-color:#94a3b8; }
+  .date-trigger:hover { border-color:rgba(255,255,255,0.5); }
   .date-trigger .date-icon { font-size:14px; opacity:0.7; }
   .date-trigger .date-text { font-weight:500; }
-  .date-trigger .date-compare { font-size:11px; color:#94a3b8; margin-left:4px; }
+  .date-trigger .date-compare { font-size:11px; color:rgba(255,255,255,0.5); margin-left:4px; }
 
   .date-panel {
     position:absolute; top:100%; right:0; margin-top:8px; z-index:1000;
@@ -202,7 +204,10 @@
 <!-- HEADER (integrated controls) -->
 <div class="header">
   <div>
-    <h1>{{ manufacturer_name }} — Brand Dashboard</h1>
+    <div class="brand-title-row">
+      <img src="{{ brand.logo }}" alt="{{ manufacturer_name }}" class="brand-logo" onerror="this.style.display='none'">
+      <h1>{{ manufacturer_name }} — Brand Dashboard</h1>
+    </div>
     <div class="subtitle">HTV Data Foundation &bull; Live data &bull; <span id="lastUpdated">—</span></div>
   </div>
   <a href="/brand/{{ slug }}/logout" class="logout-btn" title="Sign out">
@@ -219,7 +224,7 @@
       <span style="opacity:0.5">▾</span>
     </button>
 
-    <select id="globalCategory" onchange="loadAll()" style="background:#334155;color:#fff;border:1px solid #475569;border-radius:20px;padding:7px 14px;font-size:12px;font-family:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:130px;">
+    <select id="globalCategory" onchange="loadAll()" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:7px 14px;font-size:12px;font-family:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:130px;">
       <option value="">All Categories</option>
     </select>
 
