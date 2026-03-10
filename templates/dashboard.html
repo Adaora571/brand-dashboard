@@ -409,6 +409,7 @@
   <button class="btn-export-csv" onclick="exportProductCSV()" style="margin-left:auto; padding:6px 16px; background:#2e7d32; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">⬇ Export CSV</button>
 </div>
 
+<div id="prodCount" style="font-size:12px;color:#64748b;margin-bottom:6px;font-weight:500;"></div>
 <div class="card" style="overflow-x:auto; max-height:660px; overflow-y:auto;">
   <table class="prod" id="prodTableEl" style="position:relative;">
     <thead>
@@ -808,6 +809,12 @@ function renderProductTable() {
       return true;
     });
   }
+
+  // Update product count indicator
+  const total = productData.length;
+  const shown = filtered.length;
+  const countEl = document.getElementById('prodCount');
+  if (countEl) countEl.textContent = shown === total ? `Showing all ${total} products` : `Showing ${shown} of ${total} products`;
 
   const sorted = [...filtered].sort((a, b) => {
     const f = PROD_FIELDS[prodSortCol];
