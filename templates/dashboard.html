@@ -570,7 +570,7 @@ function exportProductCSV() {
   for (const [ci, f] of Object.entries(colFilters.prod)) {
     const field = fields[ci];
     filtered = filtered.filter(r => {
-      const v = String(r[field] ?? '');
+      const v = String(r[field] ?? '—');
       if (f.values && !f.values.has(v)) return false;
       if (f.condType && !matchesCondition(r[field], f.condType, f.condVal)) return false;
       return true;
@@ -626,7 +626,8 @@ function openColFilter(event, table, colIndex) {
   const container = document.getElementById('cfpValues');
   container.innerHTML = allValues.map(v => {
     const checked = checkedValues.has(v) ? 'checked' : '';
-    return `<label><input type="checkbox" value="${v}" ${checked}> ${v}</label>`;
+    const escaped = v.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<label><input type="checkbox" value="${escaped}" data-raw="${escaped}" ${checked}> ${escaped}</label>`;
   }).join('');
 
   document.getElementById('cfpSelectAll').checked = checkedValues.size === allValues.length;
@@ -655,13 +656,21 @@ document.addEventListener('click', (e) => {
   }
 });
 
+function smartSort(arr) {
+  // Sort numerically if all non-dash values are numbers, otherwise lexicographic
+  const nums = arr.filter(v => v !== '—');
+  const allNumeric = nums.length > 0 && nums.every(v => isFinite(parseFloat(v)));
+  if (allNumeric) return arr.sort((a, b) => (a === '—' ? -1 : b === '—' ? 1 : parseFloat(a) - parseFloat(b)));
+  return arr.sort();
+}
+
 function getColumnValues(table, colIndex) {
   if (table === 'prod') {
     const field = PROD_FIELDS[colIndex];
-    return [...new Set(productData.map(r => String(r[field] ?? '—')))].sort();
+    return smartSort([...new Set(productData.map(r => String(r[field] ?? '—')))]);
   } else if (table === 'fee') {
     const feeFields = ['period_label','volume','revenue','fee'];
-    return [...new Set(feeDataCache.map(r => String(r[feeFields[colIndex]] ?? '')))].sort();
+    return smartSort([...new Set(feeDataCache.map(r => String(r[feeFields[colIndex]] ?? '')))]);
   }
   return [];
 }
@@ -679,8 +688,11 @@ function toggleAllValues() {
 }
 
 function applyColFilter() {
+  if (activeFilterTable == null || activeFilterCol == null) { closeColFilter(); return; }
   const values = new Set();
-  document.querySelectorAll('#cfpValues input[type=checkbox]:checked').forEach(cb => values.add(cb.value));
+  // Decode HTML entities back to raw values for correct matching
+  const decode = s => s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&amp;/g,'&');
+  document.querySelectorAll('#cfpValues input[type=checkbox]:checked').forEach(cb => values.add(decode(cb.value)));
   const condType = document.getElementById('cfpCondType').value;
   const condVal = document.getElementById('cfpCondVal').value;
   const allValues = getColumnValues(activeFilterTable, activeFilterCol);
