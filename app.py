@@ -461,10 +461,22 @@ async def api_summary(
         SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_prescription,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
         SAFE_DIVIDE(COUNT(oi.order_item_id), COUNT(DISTINCT o.order_id)) AS avg_products_per_order,
-        COUNT(DISTINCT o.customer_id) AS total_patients
+        COUNT(DISTINCT o.customer_id) AS total_patients,
+        SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE oi.product_manufacturer_name = @mfg {date_where}
+    ),
+    repeat_stats AS (
+      SELECT
+        SAFE_DIVIDE(COUNTIF(order_count >= 2), COUNT(*)) AS repeat_purchase_rate
+      FROM (
+        SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS order_count
+        FROM `{PROJECT_DATASET}.order_items` oi
+        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        WHERE oi.product_manufacturer_name = @mfg {date_where}
+        GROUP BY 1
+      )
     ),
     prev AS (
       SELECT
@@ -480,8 +492,9 @@ async def api_summary(
     )
     SELECT
       c.*, p.prescriptions AS prev_rx, p.revenue_eur AS prev_rev,
-      p.sales_volume_g AS prev_vol, p.net_revenue_eur AS prev_net
-    FROM curr c, prev p
+      p.sales_volume_g AS prev_vol, p.net_revenue_eur AS prev_net,
+      rp.repeat_purchase_rate
+    FROM curr c, prev p, repeat_stats rp
     """
 
     params = [
@@ -511,6 +524,8 @@ async def api_summary(
             "avg_eur_per_g": r.get("avg_eur_per_g"),
             "avg_products_per_order": r.get("avg_products_per_order"),
             "total_patients": r.get("total_patients"),
+            "avg_order_value": r.get("avg_order_value"),
+            "repeat_purchase_rate": r.get("repeat_purchase_rate"),
         },
         "growth": {
             "prescriptions": safe_growth(r.get("prescriptions"), r.get("prev_rx")),
