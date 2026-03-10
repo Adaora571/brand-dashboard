@@ -656,6 +656,12 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// Apply filter on Enter key, close on Escape
+document.getElementById('colFilterPanel').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); applyColFilter(); }
+  if (e.key === 'Escape') { e.preventDefault(); closeColFilter(); }
+});
+
 function smartSort(arr) {
   // Sort numerically if all non-dash values are numbers, otherwise lexicographic
   const nums = arr.filter(v => v !== '—');
