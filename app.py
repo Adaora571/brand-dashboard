@@ -861,3 +861,18 @@ async def api_categories(request: Request, slug: str):
 async def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
+# TEMP: schema inspection endpoint (remove after use)
+@app.get("/debug/schema/{table}")
+async def debug_schema(table: str):
+    allowed = {"order_items", "orders"}
+    if table not in allowed:
+        return {"error": f"Table must be one of {allowed}"}
+    q = f"""
+    SELECT column_name, data_type
+    FROM `{PROJECT_DATASET}.INFORMATION_SCHEMA.COLUMNS`
+    WHERE table_name = '{table}'
+    ORDER BY ordinal_position
+    """
+    rows = bq_client.query(q).result()
+    return {"table": table, "columns": [{"name": r.column_name, "type": r.data_type} for r in rows]}
+
