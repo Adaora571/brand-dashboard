@@ -476,7 +476,7 @@ async def api_summary(
         COUNT(DISTINCT o.order_id) AS prescriptions,
         SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
         SUM(oi.quantity_after_cancellations) AS sales_volume_g,
-        SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur,
+        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
         SAFE_DIVIDE(SUM(oi.cancelled_quantity), SUM(oi.quantity_before_cancellations)) AS cancellation_rate,
         SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_prescription,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
@@ -503,7 +503,7 @@ async def api_summary(
         COUNT(DISTINCT o.order_id) AS prescriptions,
         SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
         SUM(oi.quantity_after_cancellations) AS sales_volume_g,
-        SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur
+        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE oi.product_manufacturer_name = @mfg
@@ -579,7 +579,7 @@ async def api_trends(request: Request, slug: str, start_date: str = "", end_date
       COUNT(DISTINCT o.order_id) AS prescriptions,
       SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
       SUM(oi.quantity_after_cancellations) AS sales_volume_g,
-      SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
       SAFE_DIVIDE(SUM(oi.cancelled_quantity), SUM(oi.quantity_before_cancellations)) AS cancellation_rate,
       SUM(oi.refund_amount_including_vat_eur) AS refund_eur,
       SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate
@@ -643,7 +643,7 @@ async def api_products(
       COUNT(DISTINCT o.order_id) AS prescriptions,
       SUM(oi.quantity_after_cancellations) AS volume_g,
       SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
-      SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
       SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
       SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_rx
     FROM `{PROJECT_DATASET}.order_items` oi
@@ -676,7 +676,7 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
 
     cat_sql = f"""
     SELECT oi.product_vertical AS category,
-      SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE oi.product_manufacturer_name = @mfg {date_where}
@@ -684,7 +684,7 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
     """
     ori_sql = f"""
     SELECT oi.product_country_or_origin AS origin,
-      SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE oi.product_manufacturer_name = @mfg {date_where}
@@ -699,7 +699,7 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
         WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 14 THEN '€10–14/g'
         ELSE '> €14/g'
       END AS price_tier,
-      SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE oi.product_manufacturer_name = @mfg {date_where}
