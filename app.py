@@ -676,11 +676,11 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
     pt_sql = f"""
     SELECT
       CASE
-        WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 8 THEN '< €8/g'
+        WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 6 THEN '< €6/g'
+        WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 8 THEN '€6–8/g'
         WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 10 THEN '€8–10/g'
-        WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 12 THEN '€10–12/g'
-        WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 15 THEN '€12–15/g'
-        ELSE '> €15/g'
+        WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 14 THEN '€10–14/g'
+        ELSE '> €14/g'
       END AS price_tier,
       SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
