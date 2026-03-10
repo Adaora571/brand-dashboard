@@ -63,14 +63,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # BRAND CONFIG — colours + logo paths per manufacturer
 # ============================================================
 BRAND_CONFIG = {
-    "cannamedical": {"color": "#568E2F", "logo": "/static/logos/cannamedical.svg", "name": "Cannamedical"},
-    "four20":       {"color": "#016269", "logo": "/static/logos/four20.svg",       "name": "Four 20 Pharma"},
-    "aurora":       {"color": "#052155", "logo": "/static/logos/aurora.svg",       "name": "Aurora"},
-    "demecan":      {"color": "#002D4E", "logo": "/static/logos/demecan.svg",      "name": "Demecan"},
-    "enua":         {"color": "#193032", "logo": "/static/logos/enua.svg",         "name": "enua"},
-    "alephsana":    {"color": "#103C3A", "logo": "/static/logos/alephsana.svg",    "name": "AlephSana"},
-    "iuvo":         {"color": "#000000", "logo": "/static/logos/iuvo.svg",         "name": "IUVO"},
-    "avaay":        {"color": "#181A1B", "logo": "/static/logos/avaay.svg",        "name": "avaay"},
+    "cannamedical": {"color": "#568E2F", "logo": "https://cannamedical.com/wp-content/uploads/2025/05/Cannamedical_Pharma_Logo_4c.svg", "name": "Cannamedical"},
+    "four20":       {"color": "#016269", "logo": "https://cdn.prod.website-files.com/67cb2220ad02e7e2eeec6827/67cb2220ad02e7e2eeec6ae5_420Pharma-logo-schrift-weiss.svg", "name": "Four 20 Pharma"},
+    "aurora":       {"color": "#052155", "logo": "https://images.ctfassets.net/g2i7xgi5mblj/5XTALMrsJhZHlWJ97YLUxh/d2616352d029c27dff86242a0eb06c71/Aurora_Europe_Primary_Logo_Blue_4x.png", "name": "Aurora"},
+    "demecan":      {"color": "#002D4E", "logo": "https://www.demecan.de/wp-content/uploads/2023/06/demecan_logo_w.svg", "name": "Demecan"},
+    "enua":         {"color": "#193032", "logo": "", "name": "enua"},
+    "alephsana":    {"color": "#103C3A", "logo": "https://www.alephsana.com/wp-content/uploads/2023/02/AlephSana_Logo_Lockup_Stacked_alephGreen.svg", "name": "AlephSana"},
+    "iuvo":         {"color": "#000000", "logo": "https://cdn.prod.website-files.com/64231bdbeac474fbfe4ff7c7/642323c0d6586d71c14b9bda_IUVO-Logo.svg", "name": "IUVO"},
+    "avaay":        {"color": "#181A1B", "logo": "", "name": "avaay"},
 }
 
 # ============================================================
