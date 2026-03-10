@@ -772,13 +772,9 @@ function applyProductFilters() {
   const origin   = document.getElementById('filterOrigin').value;
   const active = [region, brand, category, origin].filter(Boolean);
   document.getElementById('filterTag').textContent = active.length > 0 ? `— filtered by: ${active.join(', ')}` : '';
-  // If region is set, we need server-side filtering (BigQuery JOIN).
-  // For brand/category/origin we can do client-side, but server-side is cleaner.
-  if (region) {
-    reloadProducts();
-  } else {
-    renderProductTable();
-  }
+  // Always reload from server to ensure fresh data (prevents stale data
+  // after region filter is cleared). All filter params are sent server-side.
+  reloadProducts();
 }
 
 function clearProductFilters() {
@@ -789,7 +785,7 @@ function clearProductFilters() {
   document.getElementById('filterTag').textContent = '';
   colFilters.prod = {};
   updateFilterBtnStates();
-  renderProductTable();
+  reloadProducts();  // Always server-reload to restore full dataset
 }
 
 function renderProductTable() {

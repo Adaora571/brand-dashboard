@@ -619,12 +619,10 @@ async def api_products(
     date_where, date_p = date_params(start_date, end_date)
 
     extra_where = ""
-    extra_join = ""
     extra_params = []
 
     if region:
-        extra_join = f"JOIN `{PROJECT_DATASET}.orders` o2 ON oi.order_id = o2.order_id"
-        extra_where += " AND o2.shipping_address.region = @region"
+        extra_where += " AND o.shipping_address.region = @region"
         extra_params.append(bigquery.ScalarQueryParameter("region", "STRING", region))
     if brand:
         extra_where += " AND oi.product_brand_name = @brand"
@@ -650,7 +648,6 @@ async def api_products(
       SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_rx
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    {extra_join}
     WHERE oi.product_manufacturer_name = @mfg {date_where} {extra_where}
     GROUP BY 1,2,3,4
     ORDER BY revenue_eur DESC
