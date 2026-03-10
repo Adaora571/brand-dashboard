@@ -13,10 +13,19 @@
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:var(--bg); color:var(--text); font-size:13px; }
-  .header { background:linear-gradient(135deg, {{ brand.color }} 0%, {{ brand.color }}dd 100%); color:#fff; padding:18px 32px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+  .header {
+    background:linear-gradient(135deg, {{ brand.color }} 0%, {{ brand.color }}cc 50%, {{ brand.color }}ee 100%);
+    color:#fff; padding:20px 32px; display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap;
+    box-shadow:0 4px 20px rgba(0,0,0,0.15); position:relative;
+  }
+  .header::after {
+    content:''; position:absolute; top:0; left:0; right:0; height:1px;
+    background:linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0) 100%);
+  }
   .header h1 { font-size:22px; font-weight:700; }
   .header .subtitle { color:rgba(255,255,255,0.65); font-size:12px; margin-top:2px; }
-  .brand-logo { height:36px; max-width:180px; object-fit:contain; filter:brightness(0) invert(1); }
+  .brand-logo { height:36px; max-width:180px; object-fit:contain; }
+  .brand-logo.invert { filter:brightness(0) invert(1); }
   .brand-title-row { display:flex; align-items:center; gap:14px; }
   .logout-btn { color:rgba(255,255,255,0.6); padding:6px; border-radius:6px; transition:all 0.15s; text-decoration:none; display:flex; align-items:center; }
   .logout-btn:hover { color:#fff; background:rgba(255,255,255,0.1); }
@@ -25,20 +34,30 @@
   /* Old header date inputs removed — now using date picker panel */
   .btn-apply { background:#16a34a; color:#fff; border:none; border-radius:20px; padding:8px 22px; font-size:12px; font-weight:600; cursor:pointer; transition:background 0.15s; }
   .btn-apply:hover { background:#15803d; }
-  .btn-freq { background:transparent; color:rgba(255,255,255,0.75); border:1px solid rgba(255,255,255,0.25); border-radius:20px; padding:7px 18px; font-size:12px; font-weight:500; cursor:pointer; transition:all 0.15s; }
-  .btn-freq:hover { border-color:rgba(255,255,255,0.5); color:#fff; }
-  .btn-freq.active { background:rgba(255,255,255,0.2); color:#fff; border-color:rgba(255,255,255,0.4); }
+  .btn-freq {
+    background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.8); border:1px solid rgba(255,255,255,0.18);
+    border-radius:10px; padding:8px 20px; font-size:12px; font-weight:500; cursor:pointer;
+    transition:all 0.2s ease; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    box-shadow:0 1px 4px rgba(0,0,0,0.08);
+  }
+  .btn-freq:hover { border-color:rgba(255,255,255,0.4); color:#fff; background:rgba(255,255,255,0.14); box-shadow:0 2px 8px rgba(0,0,0,0.15); }
+  .btn-freq.active {
+    background:rgba(255,255,255,0.22); color:#fff; border-color:rgba(255,255,255,0.4);
+    box-shadow:0 2px 10px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.2); font-weight:600;
+  }
   .last-updated { font-size:11px; color:rgba(255,255,255,0.6); white-space:nowrap; }
 
   /* ======================== */
   /* SHOPIFY-STYLE DATE PICKER */
   /* ======================== */
   .date-trigger {
-    background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.25); border-radius:20px;
-    padding:8px 16px; font-size:12px; font-family:inherit; cursor:pointer;
-    display:flex; align-items:center; gap:8px; transition:all 0.15s;
+    background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.22);
+    border-radius:12px; padding:10px 18px; font-size:12px; font-family:inherit; cursor:pointer;
+    display:flex; align-items:center; gap:8px; transition:all 0.2s ease;
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    box-shadow:0 2px 8px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.15);
   }
-  .date-trigger:hover { border-color:rgba(255,255,255,0.5); }
+  .date-trigger:hover { border-color:rgba(255,255,255,0.45); background:rgba(255,255,255,0.18); box-shadow:0 4px 16px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.2); }
   .date-trigger .date-icon { font-size:14px; opacity:0.7; }
   .date-trigger .date-text { font-weight:500; }
   .date-trigger .date-compare { font-size:11px; color:rgba(255,255,255,0.5); margin-left:4px; }
@@ -206,7 +225,7 @@
   <div>
     <div class="brand-title-row">
       {% if brand.logo %}
-        <img src="{{ brand.logo }}" alt="{{ manufacturer_name }}" class="brand-logo" id="brandLogo"
+        <img src="{{ brand.logo }}" alt="{{ manufacturer_name }}" class="brand-logo{% if brand.logo_invert %} invert{% endif %}" id="brandLogo"
              onerror="this.style.display='none';document.getElementById('brandNameFallback').style.display='';">
         <span id="brandNameFallback" style="display:none;font-size:22px;font-weight:700;">{{ manufacturer_name }}</span>
       {% else %}
@@ -230,7 +249,7 @@
       <span style="opacity:0.5">▾</span>
     </button>
 
-    <select id="globalCategory" onchange="loadAll()" style="background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:7px 14px;font-size:12px;font-family:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:130px;">
+    <select id="globalCategory" onchange="loadAll()" style="background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.22);border-radius:10px;padding:9px 16px;font-size:12px;font-family:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:140px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 8px rgba(0,0,0,0.12),inset 0 1px 0 rgba(255,255,255,0.15);font-weight:500;">
       <option value="">All Categories</option>
     </select>
 
