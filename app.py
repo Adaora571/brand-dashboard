@@ -63,7 +63,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # BRAND CONFIG — colours + logo paths per manufacturer
 # ============================================================
 BRAND_CONFIG = {
-    "cannamedical": {"color": "#568E2F", "logo": "https://cannamedical.com/wp-content/uploads/2025/05/Cannamedical_Pharma_Logo_4c.svg", "name": "Cannamedical", "logo_invert": True},
+    "cannamedical": {"color": "#2D6A24", "logo": "https://cannamedical.com/wp-content/uploads/2025/05/Cannamedical_Pharma_Logo_4c.svg", "name": "Cannamedical", "logo_invert": True},
     "four20":       {"color": "#016269", "logo": "https://cdn.prod.website-files.com/67cb2220ad02e7e2eeec6827/67cb2220ad02e7e2eeec6ae5_420Pharma-logo-schrift-weiss.svg", "name": "Four 20 Pharma", "logo_invert": False},
     "aurora":       {"color": "#052155", "logo": "https://images.ctfassets.net/g2i7xgi5mblj/5XTALMrsJhZHlWJ97YLUxh/d2616352d029c27dff86242a0eb06c71/Aurora_Europe_Primary_Logo_Blue_4x.png", "name": "Aurora", "logo_invert": True},
     "demecan":      {"color": "#002D4E", "logo": "https://www.demecan.de/wp-content/uploads/2023/06/demecan_logo_w.svg", "name": "Demecan", "logo_invert": False},
