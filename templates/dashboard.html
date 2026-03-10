@@ -551,6 +551,7 @@ function createOrUpdate(id, cfg) { if (chartInstances[id]) chartInstances[id].de
 // ============================================================
 let prodSortCol = 6, prodSortAsc = false;
 let productData = [];
+let productTotalCount = 0;   // unfiltered total from first load
 const PROD_FIELDS = ['product_name','product_brand_name','category','origin','prescriptions','volume_g','revenue_eur','net_revenue_eur','avg_eur_per_g','avg_g_per_rx'];
 
 // Column filter state per table
@@ -810,11 +811,11 @@ function renderProductTable() {
     });
   }
 
-  // Update product count indicator
-  const total = productData.length;
+  // Update product count indicator (use unfiltered total as denominator)
+  const grandTotal = productTotalCount || productData.length;
   const shown = filtered.length;
   const countEl = document.getElementById('prodCount');
-  if (countEl) countEl.textContent = shown === total ? `Showing all ${total} products` : `Showing ${shown} of ${total} products`;
+  if (countEl) countEl.textContent = shown === grandTotal ? `Showing all ${grandTotal} products` : `Showing ${shown} of ${grandTotal} products`;
 
   const sorted = [...filtered].sort((a, b) => {
     const f = PROD_FIELDS[prodSortCol];
@@ -962,6 +963,12 @@ function renderTrends(data) {
 
 function renderProducts(data) {
   productData = data.data||[];
+  // Capture unfiltered total on initial load (when no dropdown filters are active)
+  const region   = document.getElementById('filterRegion')?.value || '';
+  const brandF   = document.getElementById('filterBrand')?.value || '';
+  const catF     = document.getElementById('filterCategory')?.value || '';
+  const originF  = document.getElementById('filterOrigin')?.value || '';
+  if (!region && !brandF && !catF && !originF) productTotalCount = productData.length;
   const brands = [...new Set(productData.map(p=>p.product_brand_name).filter(Boolean))].sort();
   const categories = [...new Set(productData.map(p=>p.category).filter(Boolean))].sort();
   const origins = [...new Set(productData.map(p=>p.origin).filter(Boolean))].sort();
