@@ -882,14 +882,17 @@ async def debug_payment_statuses():
     SELECT
       o.payment_status,
       o.is_cancelled,
-      COUNT(*) AS cnt,
-      SUM(o.total_refund_amount_including_vat_eur) AS total_refunds
+      COUNT(DISTINCT o.order_id) AS order_cnt,
+      COUNT(*) AS item_cnt,
+      SUM(o.total_refund_amount_including_vat_eur) AS total_refunds,
+      SUM(oi.refund_amount_including_vat_eur) AS item_refunds,
+      SUM(oi.quantity_after_cancellations) AS total_qty
     FROM `{PROJECT_DATASET}.orders` o
     JOIN `{PROJECT_DATASET}.order_items` oi ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = 'Cannamedical Pharma GmbH'
+    WHERE oi.product_manufacturer_name = 'Cannamedical'
       AND DATE(o.created_at) >= '2026-01-01'
     GROUP BY 1, 2
-    ORDER BY cnt DESC
+    ORDER BY order_cnt DESC
     """
     rows = bq_client.query(q).result()
     return {"data": [dict(r) for r in rows]}
