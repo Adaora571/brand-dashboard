@@ -876,19 +876,20 @@ async def debug_schema(table: str):
     rows = bq_client.query(q).result()
     return {"table": table, "columns": [{"name": r.column_name, "type": r.data_type} for r in rows]}
 
-@app.get("/debug/sample")
-async def debug_sample():
+@app.get("/debug/payment_statuses")
+async def debug_payment_statuses():
     q = f"""
     SELECT
-      oi.order_id,
-      oi.order_is_cancelled,
-      oi.refund_amount_including_vat_eur,
-      oi.total_price_after_cancellations_and_discounts_including_vat_eur,
-      oi.quantity_after_cancellations
-    FROM `{PROJECT_DATASET}.order_items` oi
+      o.payment_status,
+      o.is_cancelled,
+      COUNT(*) AS cnt,
+      SUM(o.total_refund_amount_including_vat_eur) AS total_refunds
+    FROM `{PROJECT_DATASET}.orders` o
+    JOIN `{PROJECT_DATASET}.order_items` oi ON oi.order_id = o.order_id
     WHERE oi.product_manufacturer_name = 'Cannamedical Pharma GmbH'
-      AND oi.refund_amount_including_vat_eur > 0
-    LIMIT 10
+      AND DATE(o.created_at) >= '2026-01-01'
+    GROUP BY 1, 2
+    ORDER BY cnt DESC
     """
     rows = bq_client.query(q).result()
     return {"data": [dict(r) for r in rows]}
