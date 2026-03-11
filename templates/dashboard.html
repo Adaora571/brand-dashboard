@@ -517,11 +517,24 @@ function hideStatus() { const b = document.getElementById('statusBar'); if (b) b
 
 // Dynamic unit label based on active global category filter
 // flower → g, extract/shot → ml, vape → units, mixed/all → units
+// Smart detection: if only ONE category exists, use it even when "All Categories" is shown
+let availableCategories = [];  // populated by loadCategories()
+
+function getEffectiveCategory() {
+  // If user explicitly selected a category, use it
+  const selected = (document.getElementById('globalCategory')?.value || '').toLowerCase();
+  if (selected) return selected;
+  // Smart detection: if only one category exists, treat as if it's selected
+  if (availableCategories.length === 1) return availableCategories[0].toLowerCase();
+  return '';  // truly mixed / multiple categories
+}
+
 function getUnitLabel() {
-  const cat = (document.getElementById('globalCategory')?.value || '').toLowerCase();
+  const cat = getEffectiveCategory();
   if (cat === 'flower') return 'g';
   if (cat === 'extract' || cat === 'extracts' || cat === 'shot' || cat === 'shots') return 'ml';
-  return 'units';  // vapes, mixed, or "All Categories"
+  if (!cat) return 'units';  // mixed categories
+  return 'units';  // vapes or unknown single category
 }
 function getUnitFull() {
   const u = getUnitLabel();
@@ -529,11 +542,11 @@ function getUnitFull() {
   if (u === 'ml') return 'milliliters';
   return 'units';
 }
-// Returns true when a specific category is selected (not "All Categories")
+// Returns true when we can determine a specific unit (explicit selection OR single category)
 function hasSpecificCategory() {
-  return !!(document.getElementById('globalCategory')?.value);
+  return !!getEffectiveCategory();
 }
-// Suffix for values: " g", " ml", or "" (no suffix for All Categories)
+// Suffix for values: " g", " ml", or "" (no suffix for mixed)
 function getValueSuffix() {
   if (!hasSpecificCategory()) return '';
   const u = getUnitLabel();
@@ -1136,6 +1149,7 @@ async function loadCategories() {
     const data = await res.json();
     const sel = document.getElementById('globalCategory');
     const current = sel.value;
+    availableCategories = data.categories || [];  // store for smart unit detection
     sel.innerHTML = '<option value="">All Categories</option>';
     (data.categories || []).forEach(c => {
       const opt = document.createElement('option');
