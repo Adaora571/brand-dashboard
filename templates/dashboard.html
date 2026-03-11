@@ -529,6 +529,16 @@ function getUnitFull() {
   if (u === 'ml') return 'milliliters';
   return 'units';
 }
+// Returns true when a specific category is selected (not "All Categories")
+function hasSpecificCategory() {
+  return !!(document.getElementById('globalCategory')?.value);
+}
+// Suffix for values: " g", " ml", or "" (no suffix for All Categories)
+function getValueSuffix() {
+  if (!hasSpecificCategory()) return '';
+  const u = getUnitLabel();
+  return ' ' + u;
+}
 
 // Frequency toggle (Monthly / Weekly / Daily)
 let currentFreq = 'monthly';
@@ -574,7 +584,10 @@ const colFilters = { prod: {}, fee: {} }; // { colIndex: { values: Set, condType
 
 function exportProductCSV() {
   const u = getUnitLabel();
-  const headers = ['Product','Brand','Category','Origin','Prescriptions','Volume ('+u+')','Revenue (€)','Net Revenue (€)','Avg €/'+u,'Avg '+u+'/Rx'];
+  const specific = hasSpecificCategory();
+  const headers = specific
+    ? ['Product','Brand','Category','Origin','Prescriptions','Volume ('+u+')','Revenue (€)','Net Revenue (€)','Avg €/'+u,'Avg '+u+'/Rx']
+    : ['Product','Brand','Category','Origin','Prescriptions','Volume','Revenue (€)','Net Revenue (€)','Avg €/Unit','Vol/Rx'];
   const fields = PROD_FIELDS;
 
   // Use currently filtered/sorted data from the visible table
@@ -924,24 +937,33 @@ function renderFeeTable() {
 // ============================================================
 function renderSummary(data) {
   const c = data.current||{}, g = data.growth||{};
-  const u = getUnitLabel();   // g, ml, or units
-  const uFull = getUnitFull(); // grams, milliliters, or units
+  const u = getUnitLabel();          // g, ml, or units
+  const uFull = getUnitFull();       // grams, milliliters, or units
+  const specific = hasSpecificCategory();
+  const vSuffix = getValueSuffix();  // " g", " ml", or "" (empty for All)
   document.getElementById('k-rx').textContent = fmt(c.prescriptions);
   document.getElementById('k-rev').textContent = fmt(c.revenue_eur,'€');
-  document.getElementById('k-vol').textContent = fmt(c.sales_volume_g,'',' '+u);
+  document.getElementById('k-vol').textContent = fmt(c.sales_volume_g,'',vSuffix);
   document.getElementById('k-net').textContent = fmt(c.net_revenue_eur,'€');
-  document.getElementById('k-gpx').textContent = c.avg_g_per_prescription!=null?parseFloat(c.avg_g_per_prescription).toFixed(1)+' '+u:'—';
+  document.getElementById('k-gpx').textContent = c.avg_g_per_prescription!=null?parseFloat(c.avg_g_per_prescription).toFixed(1)+(vSuffix):'—';
   document.getElementById('k-epg').textContent = c.avg_eur_per_g!=null?'€'+parseFloat(c.avg_eur_per_g).toFixed(2):'—';
   document.getElementById('k-aov').textContent = c.avg_order_value!=null?'€'+parseFloat(c.avg_order_value).toFixed(2):'—';
   document.getElementById('k-ppo').textContent = c.avg_products_per_order!=null?parseFloat(c.avg_products_per_order).toFixed(1):'—';
   document.getElementById('k-pat').textContent = fmt(c.total_patients);
   document.getElementById('k-rpr').textContent = c.repeat_purchase_rate!=null?(c.repeat_purchase_rate*100).toFixed(1)+'%':'—';
   setChg('k-rx-chg',g.prescriptions); setChg('k-rev-chg',g.revenue); setChg('k-vol-chg',g.volume); setChg('k-net-chg',g.net_revenue);
-  // Update dynamic KPI labels
-  document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume ('+u+')';
-  document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net '+uFull+' (excl. voided & returned)';
-  document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg '+u+' / Prescription';
-  document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / '+u.charAt(0).toUpperCase()+u.slice(1);
+  // Update dynamic KPI labels based on whether a specific category is selected
+  if (specific) {
+    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume ('+u+')';
+    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net '+uFull+' (excl. voided & returned)';
+    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg '+u+' / Prescription';
+    document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / '+u.charAt(0).toUpperCase()+u.slice(1);
+  } else {
+    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume';
+    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net volume (excl. voided & returned)';
+    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg Volume / Prescription';
+    document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / Unit';
+  }
   document.querySelector('#k-epg').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net Revenue / Volume';
 }
 
@@ -980,7 +1002,10 @@ function renderFee(summary, trends) {
 function renderTrends(data) {
   const rows = data.data||[], labels = rows.map(r=>fmtDate(r.period));
   const u = getUnitLabel();
-  createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:'Volume ('+u+')',data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1)},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  const specific = hasSpecificCategory();
+  const volLabel = specific ? 'Volume ('+u+')' : 'Volume';
+  const yTitle = specific ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
+  createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:volLabel,data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:yTitle},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
   createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'Revenue %',data:gR,borderColor:COLORS.blue,borderWidth:2,pointRadius:3,tension:0.3},{label:'Volume %',data:gV,borderColor:COLORS.teal,borderWidth:2,pointRadius:3,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
@@ -1007,15 +1032,26 @@ function renderProducts(data) {
 
 function updateUnitHeaders() {
   const u = getUnitLabel();
+  const specific = hasSpecificCategory();
   const thVol = document.getElementById('thVolume');
   const thEp  = document.getElementById('thEpUnit');
   const thUr  = document.getElementById('thUnitRx');
-  if (thVol) thVol.innerHTML = 'Volume ('+u+') <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
-  if (thEp)  thEp.innerHTML  = '€/'+u+' <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
-  if (thUr)  thUr.innerHTML  = u+'/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
+  if (specific) {
+    if (thVol) thVol.innerHTML = 'Volume ('+u+') <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
+    if (thEp)  thEp.innerHTML  = '€/'+u+' <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
+    if (thUr)  thUr.innerHTML  = u+'/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
+  } else {
+    if (thVol) thVol.innerHTML = 'Volume <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
+    if (thEp)  thEp.innerHTML  = '€/Unit <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
+    if (thUr)  thUr.innerHTML  = 'Vol/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
+  }
   // Also update fee table header
   const thFeeVol = document.querySelector('#feeTableEl thead th:nth-child(2)');
-  if (thFeeVol) thFeeVol.innerHTML = 'Net '+u.charAt(0).toUpperCase()+u.slice(1)+' <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
+  if (specific) {
+    if (thFeeVol) thFeeVol.innerHTML = 'Net '+u.charAt(0).toUpperCase()+u.slice(1)+' <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
+  } else {
+    if (thFeeVol) thFeeVol.innerHTML = 'Net Volume <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
+  }
 }
 
 function renderBreakdowns(data) {
