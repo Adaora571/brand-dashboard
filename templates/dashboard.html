@@ -1059,7 +1059,7 @@ function updateUnitHeaders() {
   const thUr  = document.getElementById('thUnitRx');
   if (specific && !isGenericUnit) {
     // Specific measurable unit: g, ml
-    if (thVol) thVol.innerHTML = 'Volume ('+u+') <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
+    if (thVol) thVol.innerHTML = 'Vol ('+u+') <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
     if (thEp)  thEp.innerHTML  = '€/'+u+' <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
     if (thUr)  thUr.innerHTML  = u+'/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
   } else {
