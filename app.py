@@ -861,3 +861,35 @@ async def api_categories(request: Request, slug: str):
 async def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
+# TEMP: schema inspection (remove after use)
+@app.get("/debug/schema/{table}")
+async def debug_schema(table: str):
+    allowed = {"order_items", "orders"}
+    if table not in allowed:
+        return {"error": f"Table must be one of {allowed}"}
+    q = f"""
+    SELECT column_name, data_type
+    FROM `{PROJECT_DATASET}.INFORMATION_SCHEMA.COLUMNS`
+    WHERE table_name = '{table}'
+    ORDER BY ordinal_position
+    """
+    rows = bq_client.query(q).result()
+    return {"table": table, "columns": [{"name": r.column_name, "type": r.data_type} for r in rows]}
+
+@app.get("/debug/sample")
+async def debug_sample():
+    q = f"""
+    SELECT
+      oi.order_id,
+      oi.order_is_cancelled,
+      oi.refund_amount_including_vat_eur,
+      oi.total_price_after_cancellations_and_discounts_including_vat_eur,
+      oi.quantity_after_cancellations
+    FROM `{PROJECT_DATASET}.order_items` oi
+    WHERE oi.product_manufacturer_name = 'Cannamedical Pharma GmbH'
+      AND oi.refund_amount_including_vat_eur > 0
+    LIMIT 10
+    """
+    rows = bq_client.query(q).result()
+    return {"data": [dict(r) for r in rows]}
+
