@@ -1003,8 +1003,8 @@ function renderTrends(data) {
   const rows = data.data||[], labels = rows.map(r=>fmtDate(r.period));
   const u = getUnitLabel();
   const specific = hasSpecificCategory();
-  const volLabel = specific ? 'Volume ('+u+')' : 'Units';
-  const yTitle = specific ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Units';
+  const volLabel = specific ? 'Volume ('+u+')' : 'Volume';
+  const yTitle = specific ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
   createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:volLabel,data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:yTitle},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
