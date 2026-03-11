@@ -546,11 +546,12 @@ function getUnitFull() {
 function hasSpecificCategory() {
   return !!getEffectiveCategory();
 }
-// Suffix for values: " g", " ml", or "" (no suffix for mixed)
+// Suffix for values: " g", " ml", or "" (no suffix when unit is generic "units")
 function getValueSuffix() {
   if (!hasSpecificCategory()) return '';
   const u = getUnitLabel();
-  return ' ' + u;
+  if (u === 'units') return '';  // no suffix for vapes / generic — keep values clean
+  return ' ' + u;  // " g" or " ml" only
 }
 
 // Frequency toggle (Monthly / Weekly / Daily)
@@ -598,7 +599,8 @@ const colFilters = { prod: {}, fee: {} }; // { colIndex: { values: Set, condType
 function exportProductCSV() {
   const u = getUnitLabel();
   const specific = hasSpecificCategory();
-  const headers = specific
+  const isGenericUnit = (u === 'units');
+  const headers = (specific && !isGenericUnit)
     ? ['Product','Brand','Category','Origin','Prescriptions','Volume ('+u+')','Revenue (€)','Net Revenue (€)','Avg €/'+u,'Avg '+u+'/Rx']
     : ['Product','Brand','Category','Origin','Prescriptions','Units','Revenue (€)','Net Revenue (€)','Avg €/Unit','Units/Rx'];
   const fields = PROD_FIELDS;
@@ -966,12 +968,16 @@ function renderSummary(data) {
   document.getElementById('k-rpr').textContent = c.repeat_purchase_rate!=null?(c.repeat_purchase_rate*100).toFixed(1)+'%':'—';
   setChg('k-rx-chg',g.prescriptions); setChg('k-rev-chg',g.revenue); setChg('k-vol-chg',g.volume); setChg('k-net-chg',g.net_revenue);
   // Update dynamic KPI labels based on whether a specific category is selected
-  if (specific) {
-    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume ('+u+')';
+  const isGenericUnit = (u === 'units');  // vapes or mixed — use clean "Units" style
+  if (specific && !isGenericUnit) {
+    // Specific measurable unit: g, ml — show unit in labels
+    const uCap = u.charAt(0).toUpperCase() + u.slice(1);
+    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume ('+uCap+')';
     document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net '+uFull+' (excl. voided & returned)';
-    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg '+u+' / Prescription';
-    document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / '+u.charAt(0).toUpperCase()+u.slice(1);
+    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg '+uCap+' / Prescription';
+    document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / '+uCap;
   } else {
+    // Vapes, mixed, or no category — clean "Units" style
     document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume (Units)';
     document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net units (excl. voided & returned)';
     document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg Units / Prescription';
@@ -1016,8 +1022,9 @@ function renderTrends(data) {
   const rows = data.data||[], labels = rows.map(r=>fmtDate(r.period));
   const u = getUnitLabel();
   const specific = hasSpecificCategory();
-  const volLabel = specific ? 'Volume ('+u+')' : 'Volume';
-  const yTitle = specific ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
+  const isGenericUnit = (u === 'units');
+  const volLabel = (specific && !isGenericUnit) ? 'Volume ('+u+')' : 'Volume';
+  const yTitle = (specific && !isGenericUnit) ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
   createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:volLabel,data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:yTitle},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
@@ -1046,21 +1053,24 @@ function renderProducts(data) {
 function updateUnitHeaders() {
   const u = getUnitLabel();
   const specific = hasSpecificCategory();
+  const isGenericUnit = (u === 'units');  // vapes or mixed — use clean "Units" style
   const thVol = document.getElementById('thVolume');
   const thEp  = document.getElementById('thEpUnit');
   const thUr  = document.getElementById('thUnitRx');
-  if (specific) {
+  if (specific && !isGenericUnit) {
+    // Specific measurable unit: g, ml
     if (thVol) thVol.innerHTML = 'Volume ('+u+') <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
     if (thEp)  thEp.innerHTML  = '€/'+u+' <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
     if (thUr)  thUr.innerHTML  = u+'/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
   } else {
+    // Vapes, mixed, or no category — clean "Units" style
     if (thVol) thVol.innerHTML = 'Units <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
     if (thEp)  thEp.innerHTML  = '€/Unit <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
     if (thUr)  thUr.innerHTML  = 'Units/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
   }
   // Also update fee table header
   const thFeeVol = document.querySelector('#feeTableEl thead th:nth-child(2)');
-  if (specific) {
+  if (specific && !isGenericUnit) {
     if (thFeeVol) thFeeVol.innerHTML = 'Net '+u.charAt(0).toUpperCase()+u.slice(1)+' <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
   } else {
     if (thFeeVol) thFeeVol.innerHTML = 'Net Units <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
