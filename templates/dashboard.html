@@ -587,7 +587,7 @@ function exportProductCSV() {
   const specific = hasSpecificCategory();
   const headers = specific
     ? ['Product','Brand','Category','Origin','Prescriptions','Volume ('+u+')','Revenue (€)','Net Revenue (€)','Avg €/'+u,'Avg '+u+'/Rx']
-    : ['Product','Brand','Category','Origin','Prescriptions','Volume','Revenue (€)','Net Revenue (€)','Avg €/Unit','Vol/Rx'];
+    : ['Product','Brand','Category','Origin','Prescriptions','Units','Revenue (€)','Net Revenue (€)','Avg €/Unit','Units/Rx'];
   const fields = PROD_FIELDS;
 
   // Use currently filtered/sorted data from the visible table
@@ -959,9 +959,9 @@ function renderSummary(data) {
     document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg '+u+' / Prescription';
     document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / '+u.charAt(0).toUpperCase()+u.slice(1);
   } else {
-    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume';
-    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net volume (excl. voided & returned)';
-    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg Volume / Prescription';
+    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume (Units)';
+    document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net units (excl. voided & returned)';
+    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg Units / Prescription';
     document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / Unit';
   }
   document.querySelector('#k-epg').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net Revenue / Volume';
@@ -1003,8 +1003,8 @@ function renderTrends(data) {
   const rows = data.data||[], labels = rows.map(r=>fmtDate(r.period));
   const u = getUnitLabel();
   const specific = hasSpecificCategory();
-  const volLabel = specific ? 'Volume ('+u+')' : 'Volume';
-  const yTitle = specific ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
+  const volLabel = specific ? 'Volume ('+u+')' : 'Units';
+  const yTitle = specific ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Units';
   createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:volLabel,data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:yTitle},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
@@ -1041,16 +1041,16 @@ function updateUnitHeaders() {
     if (thEp)  thEp.innerHTML  = '€/'+u+' <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
     if (thUr)  thUr.innerHTML  = u+'/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
   } else {
-    if (thVol) thVol.innerHTML = 'Volume <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
+    if (thVol) thVol.innerHTML = 'Units <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',5)">▼</button>';
     if (thEp)  thEp.innerHTML  = '€/Unit <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',8)">▼</button>';
-    if (thUr)  thUr.innerHTML  = 'Vol/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
+    if (thUr)  thUr.innerHTML  = 'Units/Rx <button class="col-filter-btn" onclick="openColFilter(event,\'prod\',9)">▼</button>';
   }
   // Also update fee table header
   const thFeeVol = document.querySelector('#feeTableEl thead th:nth-child(2)');
   if (specific) {
     if (thFeeVol) thFeeVol.innerHTML = 'Net '+u.charAt(0).toUpperCase()+u.slice(1)+' <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
   } else {
-    if (thFeeVol) thFeeVol.innerHTML = 'Net Volume <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
+    if (thFeeVol) thFeeVol.innerHTML = 'Net Units <button class="col-filter-btn" onclick="openColFilter(event,\'fee\',1)">▼</button>';
   }
 }
 
