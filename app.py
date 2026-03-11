@@ -156,6 +156,10 @@ else:
 
 PROJECT_DATASET = os.getenv("BQ_DATASET", "htv-data-foundation-prod.datamarts")
 
+# Net-orders filter (Klar-style): exclude voided/refunded/cancelled orders.
+# Partially-refunded orders are kept (matching Klar's definition).
+NET_ORDER_FILTER = "AND o.payment_status NOT IN ('voided', 'refunded') AND o.is_cancelled = FALSE"
+
 # ============================================================
 # ★ MANUFACTURER AUTH
 # Each manufacturer has a password (stored in env vars).
@@ -485,7 +489,7 @@ async def api_summary(
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg {date_where}
+      WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     ),
     repeat_stats AS (
       SELECT
@@ -494,7 +498,7 @@ async def api_summary(
         SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS order_count
         FROM `{PROJECT_DATASET}.order_items` oi
         JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-        WHERE oi.product_manufacturer_name = @mfg {date_where}
+        WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
         GROUP BY 1
       )
     ),
@@ -506,7 +510,7 @@ async def api_summary(
         (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg
+      WHERE oi.product_manufacturer_name = @mfg {NET_ORDER_FILTER}
         AND {compare_clause}
         {"AND oi.product_vertical = @category" if category else ""}
     )
@@ -585,7 +589,7 @@ async def api_trends(request: Request, slug: str, start_date: str = "", end_date
       SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     GROUP BY period ORDER BY period
     """
     params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
@@ -648,7 +652,7 @@ async def api_products(
       SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_rx
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {extra_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {extra_where} {NET_ORDER_FILTER}
     GROUP BY 1,2,3,4
     ORDER BY revenue_eur DESC
     """
@@ -679,7 +683,7 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
     ori_sql = f"""
@@ -687,7 +691,7 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
     pt_sql = f"""
@@ -702,7 +706,7 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY 1
     """
     ppo_sql = f"""
@@ -711,7 +715,7 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
       SELECT o.order_id, LEAST(COUNT(oi.order_item_id), 4) AS items
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg {date_where}
+      WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
       GROUP BY 1
     ) GROUP BY 1 ORDER BY 1
     """
@@ -752,7 +756,7 @@ async def api_patients(request: Request, slug: str, start_date: str = "", end_da
       SELECT o.customer_id, MIN(DATE(o.created_at)) AS first_date
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg
+      WHERE oi.product_manufacturer_name = @mfg {NET_ORDER_FILTER}
         {"AND oi.product_vertical = @category" if category else ""}
       GROUP BY 1
     )
@@ -763,7 +767,7 @@ async def api_patients(request: Request, slug: str, start_date: str = "", end_da
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     JOIN first_order f ON o.customer_id = f.customer_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     GROUP BY 1,2 ORDER BY 1,2
     """
     age_sql = f"""
@@ -780,7 +784,7 @@ async def api_patients(request: Request, slug: str, start_date: str = "", end_da
       COUNT(DISTINCT o.customer_id) AS patient_count
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY 1
     """
     reg_sql = f"""
@@ -788,7 +792,7 @@ async def api_patients(request: Request, slug: str, start_date: str = "", end_da
       COUNT(DISTINCT o.customer_id) AS patient_count
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
       AND o.shipping_address.region IS NOT NULL
     GROUP BY 1 ORDER BY patient_count DESC LIMIT 15
     """
@@ -827,7 +831,7 @@ async def api_pricing(request: Request, slug: str, start_date: str = "", end_dat
       SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where}
+    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
     GROUP BY period ORDER BY period
     """
     params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
@@ -860,40 +864,4 @@ async def api_categories(request: Request, slug: str):
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
-
-# TEMP: schema inspection (remove after use)
-@app.get("/debug/schema/{table}")
-async def debug_schema(table: str):
-    allowed = {"order_items", "orders"}
-    if table not in allowed:
-        return {"error": f"Table must be one of {allowed}"}
-    q = f"""
-    SELECT column_name, data_type
-    FROM `{PROJECT_DATASET}.INFORMATION_SCHEMA.COLUMNS`
-    WHERE table_name = '{table}'
-    ORDER BY ordinal_position
-    """
-    rows = bq_client.query(q).result()
-    return {"table": table, "columns": [{"name": r.column_name, "type": r.data_type} for r in rows]}
-
-@app.get("/debug/payment_statuses")
-async def debug_payment_statuses():
-    q = f"""
-    SELECT
-      o.payment_status,
-      o.is_cancelled,
-      COUNT(DISTINCT o.order_id) AS order_cnt,
-      COUNT(*) AS item_cnt,
-      SUM(o.total_refund_amount_including_vat_eur) AS total_refunds,
-      SUM(oi.refund_amount_including_vat_eur) AS item_refunds,
-      SUM(oi.quantity_after_cancellations) AS total_qty
-    FROM `{PROJECT_DATASET}.orders` o
-    JOIN `{PROJECT_DATASET}.order_items` oi ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = 'Cannamedical'
-      AND DATE(o.created_at) >= '2026-01-01'
-    GROUP BY 1, 2
-    ORDER BY order_cnt DESC
-    """
-    rows = bq_client.query(q).result()
-    return {"data": [dict(r) for r in rows]}
 
