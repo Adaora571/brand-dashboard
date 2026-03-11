@@ -226,6 +226,7 @@
     <div class="brand-title-row">
       {% if brand.logo %}
         <img src="{{ brand.logo }}" alt="{{ manufacturer_name }}" class="brand-logo{% if brand.logo_invert %} invert{% endif %}" id="brandLogo"
+             {% if brand.logo_height %}style="height:{{ brand.logo_height }}px"{% endif %}
              onerror="this.style.display='none';document.getElementById('brandNameFallback').style.display='';">
         <span id="brandNameFallback" style="display:none;font-size:22px;font-weight:700;">{{ manufacturer_name }}</span>
       {% else %}
