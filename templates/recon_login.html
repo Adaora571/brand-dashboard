@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login — {{ manufacturer_name }} Dashboard</title>
+<title>Login — HTV Reconciliation Dashboard</title>
 <style>
   :root {
-    --blue: #2563eb; --bg: #0f172a; --card: #1e293b;
+    --primary: #1F0036; --accent: #0589D3; --dark-bg: #0f172a; --card: #1e293b;
     --border: #334155; --text: #f1f5f9; --muted: #94a3b8;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg); color: var(--text); min-height: 100vh;
+    background: var(--dark-bg); color: var(--text); min-height: 100vh;
     display: flex; align-items: center; justify-content: center;
   }
   .login-card {
@@ -22,6 +22,11 @@
   }
   .logo {
     text-align: center; margin-bottom: 32px;
+  }
+  .logo-icon {
+    width: 48px; height: 48px; background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+    border-radius: 12px; display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px; font-size: 24px; font-weight: 700; color: #fff;
   }
   .logo h1 {
     font-size: 20px; font-weight: 700; color: var(--text);
@@ -40,23 +45,23 @@
   }
   .form-group input {
     width: 100%; padding: 12px 14px; font-size: 14px;
-    background: var(--bg); border: 1px solid var(--border);
+    background: var(--dark-bg); border: 1px solid var(--border);
     border-radius: 8px; color: var(--text); outline: none;
     font-family: inherit; transition: border-color 0.2s;
   }
   .form-group input:focus {
-    border-color: var(--blue);
+    border-color: var(--accent);
   }
   .form-group input::placeholder {
     color: #475569;
   }
   .btn-login {
     width: 100%; padding: 12px; font-size: 14px; font-weight: 600;
-    background: var(--blue); color: #fff; border: none;
+    background: var(--accent); color: #fff; border: none;
     border-radius: 8px; cursor: pointer; font-family: inherit;
     transition: background 0.2s; margin-top: 8px;
   }
-  .btn-login:hover { background: #1d4ed8; }
+  .btn-login:hover { background: #0472b0; }
   .btn-login:disabled {
     opacity: 0.5; cursor: not-allowed;
   }
@@ -76,17 +81,18 @@
 <body>
   <div class="login-card">
     <div class="logo">
-      <h1>{{ manufacturer_name }}</h1>
-      <p>Brand Performance Dashboard</p>
+      <div class="logo-icon">🔐</div>
+      <h1>HTV Reconciliation Dashboard</h1>
+      <p>Internal access only</p>
     </div>
 
     <div class="error-msg" id="errorMsg">{{ error or '' }}</div>
 
-    <form method="POST" action="/brand/{{ hashed_slug }}/login" id="loginForm">
+    <form method="POST" action="/reconciliation/login" id="loginForm">
       <div class="form-group">
-        <label>Password</label>
+        <label>Admin Password</label>
         <input type="password" name="password" id="password"
-               placeholder="Enter your dashboard password"
+               placeholder="Enter admin password"
                autocomplete="current-password" required autofocus>
       </div>
       <button type="submit" class="btn-login" id="btnLogin">Sign In</button>
@@ -97,7 +103,7 @@
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
       </svg>
-      Secured connection — powered by HTV
+      Secured connection — HTV internal
     </div>
   </div>
 

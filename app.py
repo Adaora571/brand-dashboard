@@ -60,6 +60,31 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ============================================================
+# URL RANDOMIZATION — Brand hash prefixes
+# ============================================================
+BRAND_HASHES = {
+    "cannamedical": "c7a3f1",
+    "four20": "d9e2b4",
+    "aurora": "a1f8c6",
+    "demecan": "b5d7e9",
+    "enua": "e3c9a2",
+    "alephsana": "f6b1d8",
+    "iuvo": "a8e4c3",
+    "avaay": "d2f7b6",
+}
+
+# Reverse lookup: hashed_slug → slug
+HASH_TO_SLUG = {f"{h}-{slug}": slug for slug, h in BRAND_HASHES.items()}
+
+def resolve_slug(hashed_slug: str) -> str:
+    """Resolve a hashed slug like 'c7a3f1-cannamedical' to 'cannamedical'."""
+    slug = HASH_TO_SLUG.get(hashed_slug)
+    if not slug:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    return slug
+
+
+# ============================================================
 # BRAND CONFIG — colours + logo paths per manufacturer
 # ============================================================
 BRAND_CONFIG = {
@@ -70,7 +95,7 @@ BRAND_CONFIG = {
     "enua":         {"color": "#193032", "logo": "/static/logos/enua.svg", "name": "enua", "logo_invert": False},
     "alephsana":    {"color": "#103C3A", "logo": "https://www.alephsana.com/wp-content/uploads/2023/02/AlephSana_Logo_Lockup_Stacked_alephGreen.svg", "name": "AlephSana", "logo_invert": True, "logo_height": 48},
     "iuvo":         {"color": "#000000", "logo": "https://cdn.prod.website-files.com/64231bdbeac474fbfe4ff7c7/642323c0d6586d71c14b9bda_IUVO-Logo.svg", "name": "IUVO", "logo_invert": False},
-    "avaay":        {"color": "#181A1B", "logo": "/static/logos/avaay.svg", "name": "avaay", "logo_invert": True},
+    "avaay":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True},
 }
 
 # ============================================================
@@ -168,14 +193,14 @@ NET_ORDER_FILTER = "AND o.payment_status NOT IN ('voided', 'refunded') AND o.is_
 # when passwords were last rotated (format: YYYY-MM-DD).
 # ============================================================
 MANUFACTURER_PASSWORDS = {
-    "cannamedical":  os.getenv("TOKEN_CANNAMEDICAL",  "cm_demo_token_2025"),
-    "four20":        os.getenv("TOKEN_FOUR20",         "f20_demo_token_2025"),
-    "aurora":        os.getenv("TOKEN_AURORA",          "au_demo_token_2025"),
-    "demecan":       os.getenv("TOKEN_DEMECAN",         "dm_demo_token_2025"),
-    "enua":          os.getenv("TOKEN_ENUA",            "en_demo_token_2025"),
-    "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "al_demo_token_2025"),
-    "iuvo":          os.getenv("TOKEN_IUVO",            "iv_demo_token_2025"),
-    "avaay":         os.getenv("TOKEN_AVAAY",           "av_demo_token_2025"),
+    "cannamedical":  os.getenv("TOKEN_CANNAMEDICAL",  "canna2026htv"),
+    "four20":        os.getenv("TOKEN_FOUR20",         "Xp7#mK9vQ2wL"),
+    "aurora":        os.getenv("TOKEN_AURORA",          "Nt4$hR8jF6bZ"),
+    "demecan":       os.getenv("TOKEN_DEMECAN",         "Wy3@cL5nG9mP"),
+    "enua":          os.getenv("TOKEN_ENUA",            "Kf6#pV2xJ8sT"),
+    "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "Bq9$wM4rH7nC"),
+    "iuvo":          os.getenv("TOKEN_IUVO",            "Zj5@tN8kD3vR"),
+    "avaay":         os.getenv("TOKEN_AVAAY",           "Lm7#gX2cF9pW"),
 }
 
 # Password set dates — used for 90-day expiry. Default = today (first deploy).
@@ -361,17 +386,17 @@ def date_params(start_date: str, end_date: str, category: str = ""):
 # ============================================================
 # PAGE ROUTES — Login + Dashboard
 # ============================================================
-@app.get("/brand/{slug}", response_class=HTMLResponse)
-async def brand_page(request: Request, slug: str):
+@app.get("/brand/{hashed_slug}", response_class=HTMLResponse)
+async def brand_page(request: Request, hashed_slug: str):
     """Show dashboard if logged in, otherwise redirect to login."""
-    if slug not in MANUFACTURER_BQ_NAMES:
-        raise HTTPException(status_code=404, detail="Brand not found")
+    slug = resolve_slug(hashed_slug)
 
     # Check session
     if request.session.get("slug") != slug:
         return templates.TemplateResponse("login.html", {
             "request": request,
             "slug": slug,
+            "hashed_slug": hashed_slug,
             "manufacturer_name": MANUFACTURER_BQ_NAMES[slug],
             "error": "",
         })
@@ -381,25 +406,24 @@ async def brand_page(request: Request, slug: str):
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "slug": slug,
+        "hashed_slug": hashed_slug,
         "manufacturer_name": MANUFACTURER_BQ_NAMES[slug],
         "fee": fee,
         "brand": brand,
     })
 
 
-@app.post("/brand/{slug}/login")
-async def brand_login(request: Request, slug: str, password: str = Form(...)):
+@app.post("/brand/{hashed_slug}/login")
+async def brand_login(request: Request, hashed_slug: str, password: str = Form(...)):
     """Handle login form submission."""
-    if slug not in MANUFACTURER_BQ_NAMES:
-        raise HTTPException(status_code=404, detail="Brand not found")
-
+    slug = resolve_slug(hashed_slug)
     mfg_name = MANUFACTURER_BQ_NAMES[slug]
     client_ip = request.client.host if request.client else "unknown"
 
     # Rate limiting
     if not check_rate_limit(client_ip):
         return templates.TemplateResponse("login.html", {
-            "request": request, "slug": slug,
+            "request": request, "slug": slug, "hashed_slug": hashed_slug,
             "manufacturer_name": mfg_name,
             "error": "Too many login attempts. Please try again in 15 minutes.",
         }, status_code=429)
@@ -407,7 +431,7 @@ async def brand_login(request: Request, slug: str, password: str = Form(...)):
     # Check password expiry
     if is_password_expired(slug):
         return templates.TemplateResponse("login.html", {
-            "request": request, "slug": slug,
+            "request": request, "slug": slug, "hashed_slug": hashed_slug,
             "manufacturer_name": mfg_name,
             "error": "Your password has expired. Please contact HTV for a new password.",
         }, status_code=403)
@@ -416,7 +440,7 @@ async def brand_login(request: Request, slug: str, password: str = Form(...)):
     if not verify_password(slug, password):
         record_failed_attempt(client_ip)
         return templates.TemplateResponse("login.html", {
-            "request": request, "slug": slug,
+            "request": request, "slug": slug, "hashed_slug": hashed_slug,
             "manufacturer_name": mfg_name,
             "error": "Invalid password. Please try again.",
         }, status_code=401)
@@ -424,25 +448,22 @@ async def brand_login(request: Request, slug: str, password: str = Form(...)):
     # Success — set session
     request.session["slug"] = slug
     request.session["login_time"] = datetime.now().isoformat()
-    return RedirectResponse(url=f"/brand/{slug}", status_code=303)
+    return RedirectResponse(url=f"/brand/{hashed_slug}", status_code=303)
 
 
-@app.get("/brand/{slug}/logout")
-async def brand_logout(request: Request, slug: str):
+@app.get("/brand/{hashed_slug}/logout")
+async def brand_logout(request: Request, hashed_slug: str):
     """Clear session and redirect to login."""
     request.session.clear()
-    return RedirectResponse(url=f"/brand/{slug}", status_code=303)
+    return RedirectResponse(url=f"/brand/{hashed_slug}", status_code=303)
 
 
 # ============================================================
-# API: Summary KPIs
+# API HELPER FUNCTIONS — DRY query logic for brand and recon APIs
 # ============================================================
-@app.get("/api/brand/{slug}/summary")
-async def api_summary(
-    request: Request, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", compare_start: str = "", compare_end: str = "",
-):
-    mfg_name = verify_session(request, slug)
+async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
+    category: str = "", compare_start: str = "", compare_end: str = ""):
+    """Internal helper for summary query, used by both brand and recon APIs."""
 
     # Check cache first
     ck = cache_key("summary", slug=slug, s=start_date, e=end_date, cat=category,
@@ -493,14 +514,25 @@ async def api_summary(
     ),
     repeat_stats AS (
       SELECT
-        SAFE_DIVIDE(COUNTIF(order_count >= 2), COUNT(*)) AS repeat_purchase_rate
+        SAFE_DIVIDE(
+          COUNTIF(lifetime_orders >= 2),
+          COUNT(*)
+        ) AS repeat_purchase_rate
       FROM (
-        SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS order_count
+        -- Get customers who ordered in the selected period
+        SELECT DISTINCT o.customer_id
         FROM `{PROJECT_DATASET}.order_items` oi
         JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
         WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+      ) period_customers
+      JOIN (
+        -- Count LIFETIME orders per customer (no date filter)
+        SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS lifetime_orders
+        FROM `{PROJECT_DATASET}.order_items` oi
+        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        WHERE oi.product_manufacturer_name = @mfg {NET_ORDER_FILTER}
         GROUP BY 1
-      )
+      ) lifetime ON period_customers.customer_id = lifetime.customer_id
     ),
     prev AS (
       SELECT
@@ -563,12 +595,21 @@ async def api_summary(
     return result
 
 
-# ============================================================
-# API: Monthly Trends
-# ============================================================
-@app.get("/api/brand/{slug}/trends")
-async def api_trends(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+@app.get("/api/brand/{hashed_slug}/summary")
+async def api_summary(
+    request: Request, hashed_slug: str, start_date: str = "", end_date: str = "",
+    category: str = "", compare_start: str = "", compare_end: str = "",
+):
+    slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    return await _get_summary(mfg_name, slug, start_date, end_date, category, compare_start, compare_end)
+
+
+# ============================================================
+# API: Monthly Trends (Helper)
+# ============================================================
+async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Internal helper for trends query, used by both brand and recon APIs."""
 
     ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category)
     cached = cache_get(ck)
@@ -604,15 +645,19 @@ async def api_trends(request: Request, slug: str, start_date: str = "", end_date
     return result
 
 
-# ============================================================
-# API: Products (with region, brand, category, origin filters)
-# ============================================================
-@app.get("/api/brand/{slug}/products")
-async def api_products(
-    request: Request, slug: str, start_date: str = "", end_date: str = "",
-    region: str = "", brand: str = "", category: str = "", origin: str = "",
-):
+@app.get("/api/brand/{hashed_slug}/trends")
+async def api_trends(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    return await _get_trends(mfg_name, slug, start_date, end_date, category)
+
+
+# ============================================================
+# API: Products (with region, brand, category, origin filters) (Helper)
+# ============================================================
+async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
+    region: str = "", brand: str = "", category: str = "", origin: str = ""):
+    """Internal helper for products query, used by both brand and recon APIs."""
 
     ck = cache_key("products", slug=slug, s=start_date, e=end_date,
                    region=region, brand=brand, category=category, origin=origin)
@@ -662,12 +707,21 @@ async def api_products(
     return result
 
 
-# ============================================================
-# API: Breakdowns (category, origin, price tier, products/order)
-# ============================================================
-@app.get("/api/brand/{slug}/breakdowns")
-async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+@app.get("/api/brand/{hashed_slug}/products")
+async def api_products(
+    request: Request, hashed_slug: str, start_date: str = "", end_date: str = "",
+    region: str = "", brand: str = "", category: str = "", origin: str = "",
+):
+    slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    return await _get_products(mfg_name, slug, start_date, end_date, region, brand, category, origin)
+
+
+# ============================================================
+# API: Breakdowns (category, origin, price tier, products/order) (Helper)
+# ============================================================
+async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Internal helper for breakdowns query, used by both brand and recon APIs."""
 
     # Check cache first
     ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category)
@@ -736,12 +790,18 @@ async def api_breakdowns(request: Request, slug: str, start_date: str = "", end_
     return result
 
 
-# ============================================================
-# API: Patient Insights
-# ============================================================
-@app.get("/api/brand/{slug}/patients")
-async def api_patients(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+@app.get("/api/brand/{hashed_slug}/breakdowns")
+async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    return await _get_breakdowns(mfg_name, slug, start_date, end_date, category)
+
+
+# ============================================================
+# API: Patient Insights (Helper)
+# ============================================================
+async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Internal helper for patients query, used by both brand and recon APIs."""
 
     ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category)
     cached = cache_get(ck)
@@ -811,12 +871,18 @@ async def api_patients(request: Request, slug: str, start_date: str = "", end_da
     return result
 
 
-# ============================================================
-# API: Pricing (Avg €/g over time)
-# ============================================================
-@app.get("/api/brand/{slug}/pricing")
-async def api_pricing(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+@app.get("/api/brand/{hashed_slug}/patients")
+async def api_patients(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    return await _get_patients(mfg_name, slug, start_date, end_date, category)
+
+
+# ============================================================
+# API: Pricing (Avg €/g over time) (Helper)
+# ============================================================
+async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Internal helper for pricing query, used by both brand and recon APIs."""
 
     ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category)
     cached = cache_get(ck)
@@ -840,12 +906,18 @@ async def api_pricing(request: Request, slug: str, start_date: str = "", end_dat
     return result
 
 
-# ============================================================
-# API: Categories for a manufacturer
-# ============================================================
-@app.get("/api/brand/{slug}/categories")
-async def api_categories(request: Request, slug: str):
+@app.get("/api/brand/{hashed_slug}/pricing")
+async def api_pricing(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    return await _get_pricing(mfg_name, slug, start_date, end_date, category)
+
+
+# ============================================================
+# API: Categories for a manufacturer (Helper)
+# ============================================================
+async def _get_categories(mfg_name: str):
+    """Internal helper for categories query, used by both brand and recon APIs."""
     sql = f"""
     SELECT DISTINCT oi.product_vertical AS category
     FROM `{PROJECT_DATASET}.order_items` oi
@@ -856,6 +928,133 @@ async def api_categories(request: Request, slug: str):
     params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)]
     rows = run_query(sql, params)
     return {"categories": [r["category"] for r in rows]}
+
+
+@app.get("/api/brand/{hashed_slug}/categories")
+async def api_categories(request: Request, hashed_slug: str):
+    slug = resolve_slug(hashed_slug)
+    mfg_name = verify_session(request, slug)
+    return await _get_categories(mfg_name)
+
+
+# ============================================================
+# RECONCILIATION DASHBOARD (HTV Admin only)
+# ============================================================
+HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "HtvRecon2026!")
+
+
+@app.get("/reconciliation", response_class=HTMLResponse)
+async def recon_page(request: Request):
+    """Show reconciliation dashboard if logged in, otherwise redirect to login."""
+    if not request.session.get("recon_auth"):
+        return templates.TemplateResponse("recon_login.html", {"request": request, "error": ""})
+    return templates.TemplateResponse("reconciliation.html", {
+        "request": request,
+        "brands": {slug: {"name": MANUFACTURER_BQ_NAMES[slug], "hash": f"{BRAND_HASHES[slug]}-{slug}"} for slug in MANUFACTURER_BQ_NAMES},
+        "fees": MANUFACTURER_FEES,
+    })
+
+
+@app.post("/reconciliation/login")
+async def recon_login(request: Request, password: str = Form(...)):
+    """Handle reconciliation login."""
+    if not hmac.compare_digest(password, HTV_RECON_PASSWORD):
+        return templates.TemplateResponse("recon_login.html", {"request": request, "error": "Invalid password."}, status_code=401)
+    request.session["recon_auth"] = True
+    return RedirectResponse(url="/reconciliation", status_code=303)
+
+
+@app.get("/reconciliation/logout")
+async def recon_logout(request: Request):
+    """Clear reconciliation session and redirect to login."""
+    request.session.pop("recon_auth", None)
+    return RedirectResponse(url="/reconciliation", status_code=303)
+
+
+# ============================================================
+# RECONCILIATION API ROUTES (requires recon_auth session)
+# ============================================================
+@app.get("/api/recon/{slug}/summary")
+async def api_recon_summary(
+    request: Request, slug: str, start_date: str = "", end_date: str = "",
+    category: str = "", compare_start: str = "", compare_end: str = "",
+):
+    """Reconciliation API — summary for any brand (requires recon auth)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    return await _get_summary(mfg_name, slug, start_date, end_date, category, compare_start, compare_end)
+
+
+@app.get("/api/recon/{slug}/trends")
+async def api_recon_trends(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Reconciliation API — trends for any brand (requires recon auth)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    return await _get_trends(mfg_name, slug, start_date, end_date, category)
+
+
+@app.get("/api/recon/{slug}/products")
+async def api_recon_products(
+    request: Request, slug: str, start_date: str = "", end_date: str = "",
+    region: str = "", brand: str = "", category: str = "", origin: str = "",
+):
+    """Reconciliation API — products for any brand (requires recon auth)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    return await _get_products(mfg_name, slug, start_date, end_date, region, brand, category, origin)
+
+
+@app.get("/api/recon/{slug}/breakdowns")
+async def api_recon_breakdowns(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Reconciliation API — breakdowns for any brand (requires recon auth)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    return await _get_breakdowns(mfg_name, slug, start_date, end_date, category)
+
+
+@app.get("/api/recon/{slug}/patients")
+async def api_recon_patients(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Reconciliation API — patients for any brand (requires recon auth)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    return await _get_patients(mfg_name, slug, start_date, end_date, category)
+
+
+@app.get("/api/recon/{slug}/pricing")
+async def api_recon_pricing(request: Request, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+    """Reconciliation API — pricing for any brand (requires recon auth)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    return await _get_pricing(mfg_name, slug, start_date, end_date, category)
+
+
+@app.get("/api/recon/{slug}/categories")
+async def api_recon_categories(request: Request, slug: str):
+    """Reconciliation API — categories for any brand (requires recon auth)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    return await _get_categories(mfg_name)
 
 
 # ============================================================

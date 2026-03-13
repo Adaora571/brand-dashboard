@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120">
+  <defs>
+    <style>
+      .sanity-icon { fill: none; stroke: #181A1B; stroke-width: 2.5; }
+      .sanity-fill { fill: #181A1B; }
+      .sanity-text { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 700; font-style: italic; font-size: 32px; fill: #181A1B; letter-spacing: -0.5px; }
+    </style>
+  </defs>
+
+  <!-- Circular emblem with horizontal lines -->
+  <circle cx="45" cy="60" r="38" class="sanity-icon" stroke-linecap="round"/>
+
+  <!-- Horizontal lines inside circle -->
+  <line x1="15" y1="45" x2="75" y2="45" class="sanity-icon" stroke-linecap="round"/>
+  <line x1="10" y1="60" x2="80" y2="60" class="sanity-icon" stroke-linecap="round"/>
+  <line x1="15" y1="75" x2="75" y2="75" class="sanity-icon" stroke-linecap="round"/>
+
+  <!-- Leaf/petal shape emerging from circle -->
+  <g class="sanity-fill">
+    <!-- Stylized leaf shape -->
+    <path d="M 60 35 Q 75 25 80 10 Q 78 30 70 45 Q 75 40 80 35 Q 78 50 70 60 Q 75 55 80 50 Q 70 70 60 80 Q 68 65 72 55 Q 65 65 60 75 Z" stroke="#181A1B" stroke-width="1" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Text: Sanity Group -->
+  <text x="110" y="72" class="sanity-text">Sanity Group</text>
+</svg>
