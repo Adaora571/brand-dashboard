@@ -77,11 +77,22 @@ BRAND_HASHES = {
 HASH_TO_SLUG = {f"{h}-{slug}": slug for slug, h in BRAND_HASHES.items()}
 
 def resolve_slug(hashed_slug: str) -> str:
-    """Resolve a hashed slug like 'c7a3f1-cannamedical' to 'cannamedical'."""
+    """Resolve a hashed slug like 'c7a3f1-cannamedical' to 'cannamedical'.
+    Also accepts old-style plain slugs (e.g. 'four20') for backward compatibility."""
     slug = HASH_TO_SLUG.get(hashed_slug)
     if not slug:
+        # Fallback: accept old-style plain slugs for API compatibility
+        if hashed_slug in BRAND_HASHES:
+            return hashed_slug
         raise HTTPException(status_code=404, detail="Brand not found")
     return slug
+
+
+def get_hashed_slug(plain_slug: str) -> str | None:
+    """If plain_slug is an old-style unhashed slug, return its hashed version."""
+    if plain_slug in BRAND_HASHES:
+        return f"{BRAND_HASHES[plain_slug]}-{plain_slug}"
+    return None
 
 
 # ============================================================
@@ -95,7 +106,7 @@ BRAND_CONFIG = {
     "enua":         {"color": "#193032", "logo": "/static/logos/enua.svg", "name": "enua", "logo_invert": False},
     "alephsana":    {"color": "#103C3A", "logo": "https://www.alephsana.com/wp-content/uploads/2023/02/AlephSana_Logo_Lockup_Stacked_alephGreen.svg", "name": "AlephSana", "logo_invert": True, "logo_height": 48},
     "iuvo":         {"color": "#000000", "logo": "https://cdn.prod.website-files.com/64231bdbeac474fbfe4ff7c7/642323c0d6586d71c14b9bda_IUVO-Logo.svg", "name": "IUVO", "logo_invert": False},
-    "sanitygroup":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True, "logo_height": 56},
+    "sanitygroup":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True, "logo_height": 56, "logo_gap": 6},
 }
 
 # ============================================================
@@ -219,7 +230,7 @@ MANUFACTURER_BQ_NAMES = {
     "enua":          "enua",
     "alephsana":     "AlephSana",
     "iuvo":          "IUVO",
-    "sanitygroup":         "avaay Medical",
+    "sanitygroup":         "Sanity Group",
 }
 
 # ============================================================
@@ -397,6 +408,11 @@ def date_params(start_date: str, end_date: str, category: str = ""):
 @app.get("/brand/{hashed_slug}", response_class=HTMLResponse)
 async def brand_page(request: Request, hashed_slug: str):
     """Show dashboard if logged in, otherwise redirect to login."""
+    # Support old-style URLs: /brand/four20 → /brand/d9e2b4-four20
+    redirect_slug = get_hashed_slug(hashed_slug)
+    if redirect_slug:
+        return RedirectResponse(url=f"/brand/{redirect_slug}", status_code=301)
+
     slug = resolve_slug(hashed_slug)
 
     # Check session
