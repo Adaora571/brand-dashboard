@@ -313,8 +313,9 @@
   <div class="card kpi-card accent-green"><div class="label">Sales Volume (g)</div><div class="value" id="k-vol">—</div><div class="change" id="k-vol-chg"></div><div class="kpi-desc">Net grams (excl. voided &amp; returned)</div></div>
   <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">Excl. discounts, taxes &amp; refunds</div></div>
 </div>
-<div class="grid grid-3" style="margin:12px auto 0;max-width:900px;">
+<div class="grid grid-4" style="margin:12px auto 0;">
   <div class="card kpi-card accent-teal" style="padding:14px 18px;"><div class="label">Avg € / Gram</div><div class="value" style="font-size:22px;margin:4px 0 4px;" id="k-epg">—</div><div class="kpi-desc">Net Revenue / Volume</div></div>
+  <div class="card kpi-card accent-green" style="padding:14px 18px;"><div class="label">New Patients</div><div class="value" style="font-size:22px;margin:4px 0 4px;" id="k-newpat">—</div><div class="kpi-desc">First-time buyers</div></div>
   <div class="card kpi-card accent-purple" style="padding:14px 18px;"><div class="label">Total Patients</div><div class="value" style="font-size:22px;margin:4px 0 4px;" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
   <div class="card kpi-card accent-teal" style="padding:14px 18px;"><div class="label">Repeat Purchase Rate</div><div class="value" style="font-size:22px;margin:4px 0 4px;" id="k-rpr">—</div><div class="kpi-desc">Patients with 2+ lifetime orders</div></div>
 </div>
@@ -922,6 +923,8 @@ function renderPatients(data) {
   const periods=[...new Set(nr.map(r=>r.period))].sort();
   const nd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='new')||{}).patient_count||0);
   const rd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='returning')||{}).patient_count||0);
+  const newPatTotal=nd.reduce((a,b)=>a+b,0);
+  document.getElementById('k-newpat').textContent=fmt(newPatTotal);
   createOrUpdate('chartPatients',{type:'bar',data:{labels:periods.map(fmtDate),datasets:[{label:'New',data:nd,backgroundColor:COLORS.blue+'88',borderColor:COLORS.blue,borderWidth:1,stack:'a'},{label:'Returning',data:rd,backgroundColor:COLORS.green+'88',borderColor:COLORS.green,borderWidth:1,stack:'a'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true}}}});
   const age=data.age_segments||[];
   createOrUpdate('chartAge',{type:'bar',data:{labels:age.map(a=>a.age_segment),datasets:[{label:'Patients',data:age.map(a=>a.patient_count),backgroundColor:PALETTE.slice(0,age.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
