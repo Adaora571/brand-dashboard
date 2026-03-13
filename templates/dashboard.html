@@ -221,7 +221,7 @@
     <div class="brand-title-row"{% if brand.logo_gap %} style="gap:{{ brand.logo_gap }}px;"{% endif %}>
       {% if brand.logo %}
         <img src="{{ brand.logo }}" alt="{{ manufacturer_name }}" class="brand-logo{% if brand.logo_invert %} invert{% endif %}" id="brandLogo"
-             {% if brand.logo_height %}style="height:{{ brand.logo_height }}px"{% endif %}
+             {% if brand.logo_height %}style="height:{{ brand.logo_height }}px;max-width:{{ (brand.logo_height * 2)|int }}px"{% endif %}
              onerror="this.style.display='none';document.getElementById('brandNameFallback').style.display='';">
         <span id="brandNameFallback" style="display:none;font-size:22px;font-weight:700;">{{ manufacturer_name }}</span>
       {% else %}
