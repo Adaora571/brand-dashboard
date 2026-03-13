@@ -223,6 +223,10 @@
       <option value="all">All Brands</option>
     </select>
 
+    <select id="globalCategory" onchange="changeBrand()" class="brand-selector" style="min-width:140px;">
+      <option value="">All Categories</option>
+    </select>
+
     <button class="date-trigger" id="dateTrigger" onclick="toggleDatePanel()">
       <span class="date-icon">📅</span>
       <span class="date-text" id="dateTriggerText">Jan 1 – Mar 13, 2026</span>
@@ -493,7 +497,7 @@ let productTotalCount = 0;
 // Initialize
 document.addEventListener('DOMContentLoaded', initBrands);
 
-function initBrands() {
+async function initBrands() {
   const sel = document.getElementById('brandSelector');
   Object.keys(BRANDS_DATA).forEach(slug => {
     const brand = BRANDS_DATA[slug];
@@ -502,15 +506,40 @@ function initBrands() {
     opt.textContent = brand.name;
     sel.appendChild(opt);
   });
-  // Auto-load consolidated "All Brands" view on page load
-  loadAll();
+  // Load categories and data for "All Brands" on page load
+  await loadCategories();
+  await loadAll();
+}
+
+async function loadCategories() {
+  try {
+    const resp = await fetch(`/api/recon/${selectedBrandSlug}/categories`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const sel = document.getElementById('globalCategory');
+    const curr = sel.value;
+    // Keep first "All Categories" option, remove rest
+    while (sel.options.length > 1) sel.remove(1);
+    (data.categories || []).forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = cat;
+      sel.appendChild(opt);
+    });
+    sel.value = curr; // restore selection if still valid
+  } catch (e) {
+    console.error('Categories load failed:', e);
+  }
 }
 
 async function changeBrand() {
+  const prevSlug = selectedBrandSlug;
   selectedBrandSlug = document.getElementById('brandSelector').value || 'all';
   // Show/hide Fee Terms section based on brand selection
   const feeSection = document.getElementById('feeSection');
   feeSection.style.display = (selectedBrandSlug === 'all') ? 'none' : '';
+  // Reload categories if brand changed (not just category filter change)
+  if (selectedBrandSlug !== prevSlug) await loadCategories();
   await loadAll();
 }
 
@@ -525,11 +554,15 @@ async function loadAll() {
 
   try {
     const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status}: ${errText}`);
+    }
     allData = await resp.json();
     render();
   } catch (e) {
     console.error('Load failed:', e);
+    document.getElementById('k-rx').textContent = 'Error';
   }
 }
 

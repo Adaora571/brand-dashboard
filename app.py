@@ -1265,9 +1265,12 @@ async def api_recon_categories(request: Request, slug: str):
     """Reconciliation API — categories for any brand (requires recon auth)."""
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
-    if slug not in MANUFACTURER_BQ_NAMES:
+    if slug == "all":
+        mfg_name = None
+    elif slug not in MANUFACTURER_BQ_NAMES:
         raise HTTPException(status_code=404, detail="Brand not found")
-    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    else:
+        mfg_name = MANUFACTURER_BQ_NAMES[slug]
     return await _get_categories(mfg_name)
 
 
