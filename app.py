@@ -231,7 +231,10 @@ def mfg_clause(mfg_name):
     Handles both single name (str) and multiple names (list).
     When a list is provided, uses IN UNNEST() to match any of the names,
     which merges data from multiple BQ manufacturer entries into one view.
+    When mfg_name is None (all-brands view), returns a no-op TRUE clause.
     """
+    if mfg_name is None:
+        return ("TRUE", [])
     if isinstance(mfg_name, list):
         return (
             "oi.product_manufacturer_name IN UNNEST(@mfg_names)",
@@ -1062,9 +1065,12 @@ async def api_recon_combined(
     """Combined reconciliation endpoint — returns all data in one response."""
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
-    if slug not in MANUFACTURER_BQ_NAMES:
+    if slug == "all":
+        mfg_name = None  # No manufacturer filter — consolidated view
+    elif slug not in MANUFACTURER_BQ_NAMES:
         raise HTTPException(status_code=404, detail="Brand not found")
-    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    else:
+        mfg_name = MANUFACTURER_BQ_NAMES[slug]
 
     # Run all queries in parallel (including platform total for market share)
     summary, trends, products, breakdowns, patients, pricing, platform_rx = await asyncio.gather(

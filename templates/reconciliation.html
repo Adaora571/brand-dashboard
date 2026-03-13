@@ -220,7 +220,7 @@
   </a>
   <div class="header-controls pos-rel">
     <select id="brandSelector" onchange="changeBrand()" class="brand-selector">
-      <option value="">Select a brand...</option>
+      <option value="all">All Brands</option>
     </select>
 
     <button class="date-trigger" id="dateTrigger" onclick="toggleDatePanel()">
@@ -294,17 +294,17 @@
   <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">Excl. fees, taxes, refunds</div></div>
   <div class="card kpi-card accent-orange"><div class="label">Market Share (Rx)</div><div class="value" id="k-mshare">—</div><div class="kpi-desc">% of total platform prescriptions</div></div>
 </div>
-<div class="grid grid-7" style="margin-top:16px;">
+<div class="grid grid-6" style="margin-top:16px;">
   <div class="card kpi-card accent-red"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
   <div class="card kpi-card accent-green"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="kpi-desc">Net Rev / Volume</div></div>
   <div class="card kpi-card accent-purple"><div class="label">Avg Order Value</div><div class="value" id="k-aov">—</div><div class="kpi-desc">Revenue / Orders</div></div>
-  <div class="card kpi-card accent-orange"><div class="label">Avg Orders / Patient</div><div class="value" id="k-opp">—</div><div class="kpi-desc">Prescriptions ÷ Patients</div></div>
   <div class="card kpi-card accent-teal"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="kpi-desc">Patients w/ 2+ orders</div></div>
   <div class="card kpi-card accent-blue"><div class="label">Avg Products / Order</div><div class="value" id="k-ppo">—</div><div class="kpi-desc">Products per order</div></div>
   <div class="card kpi-card accent-red"><div class="label">Top 3 SKU Conc.</div><div class="value" id="k-sku3">—</div><div class="kpi-desc">% rev from top 3 products</div></div>
 </div>
 
 <!-- SECTION 2: FEE INFORMATION -->
+<div id="feeSection" style="display:none;">
 <div class="section-title"><span class="num">2</span> Fee Terms &amp; Reconciliation</div>
 
 <!-- Deal Terms Card -->
@@ -349,6 +349,7 @@
     </table>
   </div>
 </div>
+</div><!-- /feeSection -->
 
 <!-- SECTION 3: PRODUCT PERFORMANCE -->
 <div class="section-title"><span class="num">3</span> Product Performance <span class="filter-tag" id="filterTag"></span></div>
@@ -475,7 +476,7 @@ const BRANDS_DATA = {{ brands | tojson }};
 const FEES_DATA = {{ fees | tojson }};
 
 // State
-let selectedBrandSlug = null;
+let selectedBrandSlug = 'all';
 let allData = {};
 let currentProducts = [];
 let currentFees = [];
@@ -501,16 +502,19 @@ function initBrands() {
     opt.textContent = brand.name;
     sel.appendChild(opt);
   });
+  // Auto-load consolidated "All Brands" view on page load
+  loadAll();
 }
 
 async function changeBrand() {
-  selectedBrandSlug = document.getElementById('brandSelector').value;
-  if (!selectedBrandSlug) return;
+  selectedBrandSlug = document.getElementById('brandSelector').value || 'all';
+  // Show/hide Fee Terms section based on brand selection
+  const feeSection = document.getElementById('feeSection');
+  feeSection.style.display = (selectedBrandSlug === 'all') ? 'none' : '';
   await loadAll();
 }
 
 async function loadAll() {
-  if (!selectedBrandSlug) return;
   const s = document.getElementById('startDate').value;
   const e = document.getElementById('endDate').value;
   const cs = document.getElementById('compareStart').value;
@@ -566,10 +570,6 @@ function renderKPIs() {
   } else {
     mshareEl.textContent = '—';
   }
-
-  // Avg Orders per Patient
-  const ordPerPat = kpi.num_patients ? kpi.num_rx / kpi.num_patients : 0;
-  document.getElementById('k-opp').textContent = ordPerPat.toFixed(1);
 
   // Top 3 SKU Concentration
   const prods = allData.products || [];
