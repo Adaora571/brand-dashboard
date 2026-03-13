@@ -485,6 +485,34 @@ let allData = {};
 let currentProducts = [];
 let currentFees = [];
 let charts = {};
+let availableCategories = [];
+
+// ── Dynamic unit helpers (ported from brand dashboard) ──
+function getEffectiveCategory() {
+  const selected = (document.getElementById('globalCategory')?.value || '').toLowerCase();
+  if (selected) return selected;
+  if (availableCategories.length === 1) return availableCategories[0].toLowerCase();
+  return '';
+}
+function getUnitLabel() {
+  const cat = getEffectiveCategory();
+  if (cat === 'flower') return 'g';
+  if (cat === 'extract' || cat === 'extracts' || cat === 'shot' || cat === 'shots') return 'units';
+  if (!cat) return 'units';
+  return 'units';
+}
+function getUnitFull() {
+  const u = getUnitLabel();
+  return u === 'g' ? 'grams' : 'units';
+}
+function hasSpecificCategory() {
+  return !!getEffectiveCategory();
+}
+function getValueSuffix() {
+  if (!hasSpecificCategory()) return '';
+  const u = getUnitLabel();
+  return u === 'units' ? '' : ' ' + u;
+}
 
 // Product table state
 let prodSortCol = 6, prodSortAsc = false;
@@ -516,11 +544,12 @@ async function loadCategories() {
     const resp = await fetch(`/api/recon/${selectedBrandSlug}/categories`);
     if (!resp.ok) return;
     const data = await resp.json();
+    availableCategories = data.categories || [];
     const sel = document.getElementById('globalCategory');
     const curr = sel.value;
     // Keep first "All Categories" option, remove rest
     while (sel.options.length > 1) sel.remove(1);
-    (data.categories || []).forEach(cat => {
+    availableCategories.forEach(cat => {
       const opt = document.createElement('option');
       opt.value = cat;
       opt.textContent = cat;
@@ -595,6 +624,26 @@ function renderKPIs() {
   document.getElementById('k-aov').textContent = formatCurr(kpi.aov || 0);
   document.getElementById('k-pat').textContent = formatNum(kpi.num_patients);
   document.getElementById('k-rpr').textContent = formatPct(kpi.repeat_rate);
+
+  // Dynamic unit labels based on category
+  const u = getUnitLabel();
+  const uFull = getUnitFull();
+  const specific = hasSpecificCategory();
+  const isGenericUnit = (u === 'units');
+  const volCard = document.getElementById('k-vol').closest('.kpi-card');
+  const epgCard = document.getElementById('k-epg').closest('.kpi-card');
+  if (specific && !isGenericUnit) {
+    const uCap = u.charAt(0).toUpperCase() + u.slice(1);
+    volCard.querySelector('.label').textContent = 'Sales Volume (' + uCap + ')';
+    volCard.querySelector('.kpi-desc').textContent = 'Net ' + uFull + ' (excl. voided & returned)';
+    epgCard.querySelector('.label').textContent = 'Avg € / ' + uCap;
+    epgCard.querySelector('.kpi-desc').textContent = 'Net Rev / Volume (' + uFull + ')';
+  } else {
+    volCard.querySelector('.label').textContent = 'Sales Volume (Units)';
+    volCard.querySelector('.kpi-desc').textContent = 'Net units (excl. voided & returned)';
+    epgCard.querySelector('.label').textContent = 'Avg € / Unit';
+    epgCard.querySelector('.kpi-desc').textContent = 'Net Rev / Volume';
+  }
 
   // Market share
   const mshareEl = document.getElementById('k-mshare');
@@ -956,6 +1005,21 @@ function renderProducts() {
     return;
   }
   document.getElementById('prodTableEl').style.display = '';
+
+  // Dynamic table header units
+  const u = getUnitLabel();
+  const specific = hasSpecificCategory();
+  const isGenericUnit = (u === 'units');
+  if (specific && !isGenericUnit) {
+    const uCap = u.charAt(0).toUpperCase() + u.slice(1);
+    document.getElementById('thVolume').firstChild.textContent = 'Volume (' + uCap + ') ';
+    document.getElementById('thEpUnit').firstChild.textContent = '€/' + u + ' ';
+    document.getElementById('thUnitRx').firstChild.textContent = u + '/Rx ';
+  } else {
+    document.getElementById('thVolume').firstChild.textContent = 'Volume (Units) ';
+    document.getElementById('thEpUnit').firstChild.textContent = '€/unit ';
+    document.getElementById('thUnitRx').firstChild.textContent = 'units/Rx ';
+  }
 
   // Capture unfiltered total on initial load (when no dropdown filters are active)
   const region   = document.getElementById('filterRegion')?.value || '';
