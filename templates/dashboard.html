@@ -216,7 +216,7 @@
 <body>
 
 <!-- HEADER (integrated controls) -->
-<div class="header">
+<div class="header"{% if brand.logo_header_padding is defined %} style="padding-top:{{ brand.logo_header_padding }}px;padding-bottom:{{ brand.logo_header_padding }}px;"{% endif %}>
   <div>
     <div class="brand-title-row"{% if brand.logo_gap %} style="gap:{{ brand.logo_gap }}px;"{% endif %}>
       {% if brand.logo %}
