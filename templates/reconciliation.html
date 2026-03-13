@@ -584,7 +584,19 @@ async function changeBrand() {
   await loadAll();
 }
 
+function showStatus(msg, isError = false) {
+  let bar = document.getElementById('statusBar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'statusBar'; bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:8px 20px;font-size:12px;font-weight:600;text-align:center;transition:opacity 0.3s;'; document.body.prepend(bar); }
+  bar.style.background = isError ? '#fef2f2' : '#eff6ff';
+  bar.style.color = isError ? '#991b1b' : '#1e40af';
+  bar.textContent = msg;
+  bar.style.display = 'block';
+  bar.style.opacity = '1';
+}
+function hideStatus() { const b = document.getElementById('statusBar'); if (b) { b.style.opacity = '0'; setTimeout(() => { b.style.display = 'none'; }, 300); } }
+
 async function loadAll() {
+  showStatus('Loading data from BigQuery…');
   const s = document.getElementById('startDate').value;
   const e = document.getElementById('endDate').value;
   const cs = document.getElementById('compareStart').value;
@@ -601,8 +613,10 @@ async function loadAll() {
     }
     allData = await resp.json();
     render();
-  } catch (e) {
-    console.error('Load failed:', e);
+    hideStatus();
+  } catch (err) {
+    console.error('Load failed:', err);
+    showStatus('Error loading data: ' + err.message, true);
     document.getElementById('k-rx').textContent = 'Error';
   }
 }
@@ -1538,8 +1552,12 @@ function formatChange(curr, prev) {
   if (!curr || !prev) return '';
   const pct = ((curr - prev) / prev * 100).toFixed(1);
   const cls = pct >= 0 ? 'up' : 'down';
-  const sym = pct >= 0 ? '↑ ' : '↓ ';
-  return `<span class="${cls}">${sym}${Math.abs(pct)}%</span>`;
+  const sym = pct >= 0 ? '▲ ' : '▼ ';
+  const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year' };
+  const cmpOn = document.getElementById('compareToggle')?.classList.contains('on');
+  const cmpMode = document.querySelector('.compare-opt.active')?.dataset.cmp || 'prev';
+  const label = cmpOn ? (cmpLabels[cmpMode] || 'vs prev') : 'vs prev period';
+  return `<span class="${cls}">${sym}${Math.abs(pct)}% ${label}</span>`;
 }
 
 </script>
