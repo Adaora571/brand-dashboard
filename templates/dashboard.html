@@ -24,7 +24,7 @@
   }
   .header h1 { font-size:22px; font-weight:700; }
   .header .subtitle { color:rgba(255,255,255,0.65); font-size:12px; margin-top:2px; }
-  .brand-logo { height:48px; max-width:220px; object-fit:contain; }
+  .brand-logo { height:36px; max-width:180px; object-fit:contain; }
   .brand-logo.invert { filter:brightness(0) invert(1); }
   .brand-title-row { display:flex; align-items:center; gap:14px; }
   .logout-btn { color:rgba(255,255,255,0.55); padding:6px 12px; border-radius:8px; transition:all 0.2s; text-decoration:none; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; }
@@ -145,9 +145,9 @@
   .kpi-card .change.up { color:var(--green); }
   .kpi-card .change.down { color:var(--red); }
   .kpi-card .kpi-desc { font-size:11px; color:#94a3b8; margin-top:4px; }
-  .kpi-secondary { border-top:none; background:var(--bg); padding:14px 18px; }
+  .kpi-secondary { padding:12px 16px; }
   .kpi-secondary .label { font-size:10px; }
-  .kpi-secondary .value { font-size:20px; font-weight:600; margin:4px 0 2px; }
+  .kpi-secondary .value { font-size:20px; font-weight:600; margin:3px 0 2px; }
   .kpi-secondary .kpi-desc { font-size:10px; }
   .chart-box { height:280px; position:relative; }
   .chart-box canvas { width:100%!important; height:100%!important; }
@@ -318,10 +318,10 @@
   <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">Excl. discounts, taxes &amp; refunds</div></div>
 </div>
 <div class="grid grid-4" style="margin:12px auto 0;">
-  <div class="card kpi-card kpi-secondary"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="kpi-desc">Net Revenue / Volume</div></div>
-  <div class="card kpi-card kpi-secondary"><div class="label">New Patients</div><div class="value" id="k-newpat">—</div><div class="kpi-desc">First-time buyers</div></div>
-  <div class="card kpi-card kpi-secondary"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
-  <div class="card kpi-card kpi-secondary"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="kpi-desc">Patients with 2+ lifetime orders</div></div>
+  <div class="card kpi-card kpi-secondary accent-teal"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="kpi-desc">Net Revenue / Volume</div></div>
+  <div class="card kpi-card kpi-secondary accent-green"><div class="label">New Patients</div><div class="value" id="k-newpat">—</div><div class="kpi-desc">First-time buyers</div></div>
+  <div class="card kpi-card kpi-secondary accent-purple"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
+  <div class="card kpi-card kpi-secondary accent-orange"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="kpi-desc">Patients with 2+ lifetime orders</div></div>
 </div>
 
 <!-- SECTION 2: TRENDS -->
@@ -871,7 +871,7 @@ function renderTrends(data) {
   createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),backgroundColor:rows.map((_,i)=>PALETTE[i%PALETTE.length]),yAxisID:'y'},{label:volLabel,data:rows.map(r=>r.sales_volume_g),type:'line',borderColor:'#13375E',borderWidth:2,yAxisID:'y1',fill:false,tension:0.3,pointBackgroundColor:'#13375E'}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'+((specific&&!isGenericUnit)?u:'')}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
-  createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'MoM Growth %',data:gR,borderColor:COLORS.green,borderWidth:2,backgroundColor:'rgba(22,163,74,0.1)',fill:true,tension:0.3,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
+  createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'Revenue %',data:gR,borderColor:COLORS.green,borderWidth:2,backgroundColor:'rgba(22,163,74,0.1)',fill:true,tension:0.3,pointRadius:3},{label:'Volume %',data:gV,borderColor:'#13375E',borderWidth:2,tension:0.3,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
 }
 
 function renderProducts(data) {
