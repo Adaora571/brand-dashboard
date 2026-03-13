@@ -848,12 +848,13 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     GROUP BY 1 ORDER BY 1
     """
     reg_sql = f"""
-    SELECT o.shipping_address.region AS region,
+    SELECT TRIM(o.shipping_address.region) AS region,
       COUNT(DISTINCT o.customer_id) AS patient_count
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
       AND o.shipping_address.region IS NOT NULL
+      AND TRIM(o.shipping_address.region) != ''
     GROUP BY 1 ORDER BY patient_count DESC LIMIT 15
     """
     # Run all 3 queries in parallel instead of sequentially
