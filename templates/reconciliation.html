@@ -1119,9 +1119,9 @@ function renderProductTable() {
 
   // Update product count indicator
   const grandTotal = productTotalCount || currentProducts.length;
-  const shown = Math.min(filtered.length, 15);
+  const shown = filtered.length;
   const countEl = document.getElementById('prodCount');
-  if (countEl) countEl.textContent = shown === grandTotal ? `Showing all ${grandTotal} products` : `Showing ${shown} of ${filtered.length} products`;
+  if (countEl) countEl.textContent = shown === grandTotal ? `Showing all ${grandTotal} products` : `Showing ${shown} of ${grandTotal} products`;
 
   const sorted = [...filtered].sort((a, b) => {
     const f = PROD_FIELDS[prodSortCol];
@@ -1130,9 +1130,8 @@ function renderProductTable() {
     return prodSortAsc ? va - vb : vb - va;
   });
 
-  const displayProducts = sorted.slice(0, 15);
   const tbody = document.getElementById('prodBody');
-  tbody.innerHTML = displayProducts.map(prod => {
+  tbody.innerHTML = sorted.map(prod => {
     const catClass = (prod.category||'').toLowerCase().includes('flower') ? 'fl' : ((prod.category||'').toLowerCase().includes('extract') ? 'ex' : 'ot');
     return `<tr>
       <td style="font-weight:500;max-width:280px">${prod.name || '—'}</td>
