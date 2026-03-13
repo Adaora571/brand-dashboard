@@ -972,6 +972,127 @@ async def recon_logout(request: Request):
 
 
 # ============================================================
+# RECONCILIATION — COMBINED API (single call for the recon frontend)
+# ============================================================
+@app.get("/api/recon/{slug}")
+async def api_recon_combined(
+    request: Request, slug: str,
+    start: str = "", end: str = "", cstart: str = "", cend: str = "",
+    category: str = "",
+):
+    """Combined reconciliation endpoint — returns all data in one response."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if slug not in MANUFACTURER_BQ_NAMES:
+        raise HTTPException(status_code=404, detail="Brand not found")
+    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+
+    # Run all queries in parallel
+    summary, trends, products, breakdowns, patients, pricing = await asyncio.gather(
+        _get_summary(mfg_name, slug, start, end, category, cstart, cend),
+        _get_trends(mfg_name, slug, start, end, category),
+        _get_products(mfg_name, slug, start, end),
+        _get_breakdowns(mfg_name, slug, start, end, category),
+        _get_patients(mfg_name, slug, start, end, category),
+        _get_pricing(mfg_name, slug, start, end, category),
+    )
+
+    # Map summary → kpi / kpi_compare
+    cur = summary.get("current", {})
+    grw = summary.get("growth", {})
+    fee_info = MANUFACTURER_FEES.get(slug, {})
+    fee_amt = summary.get("fee", {}).get("amount", 0)
+
+    kpi = [{
+        "num_rx": cur.get("prescriptions"),
+        "revenue": cur.get("revenue_eur"),
+        "volume": cur.get("sales_volume_g"),
+        "net_revenue": cur.get("net_revenue_eur"),
+        "total_fee": fee_amt,
+        "ppo": cur.get("avg_products_per_order"),
+        "epg": cur.get("avg_eur_per_g"),
+        "aov": cur.get("avg_order_value"),
+        "num_patients": cur.get("total_patients"),
+        "repeat_rate": cur.get("repeat_purchase_rate"),
+    }]
+
+    # Build compare KPI from growth percentages (reverse-compute previous values)
+    prev_rx = (cur.get("prescriptions") or 0) / (1 + grw.get("prescriptions", 0)) if grw.get("prescriptions") else None
+    prev_rev = (cur.get("revenue_eur") or 0) / (1 + grw.get("revenue", 0)) if grw.get("revenue") else None
+    prev_vol = (cur.get("sales_volume_g") or 0) / (1 + grw.get("volume", 0)) if grw.get("volume") else None
+    prev_net = (cur.get("net_revenue_eur") or 0) / (1 + grw.get("net_revenue", 0)) if grw.get("net_revenue") else None
+    kpi_compare = [{"num_rx": prev_rx, "revenue": prev_rev, "volume": prev_vol, "net_revenue": prev_net}]
+
+    # Map trends → trend + growth + fee_detail
+    trend_data = trends.get("data", [])
+    trend_out = [{"period": r["period"], "revenue": r.get("revenue_eur", 0), "volume": r.get("sales_volume_g", 0)} for r in trend_data]
+
+    # MoM growth
+    growth_out = []
+    for i, r in enumerate(trend_data):
+        prev_r = trend_data[i - 1].get("revenue_eur", 0) if i > 0 else 0
+        gpct = ((r.get("revenue_eur", 0) - prev_r) / prev_r * 100) if prev_r else 0
+        growth_out.append({"period": r["period"], "growth_pct": round(gpct, 1)})
+
+    # Fee detail per month
+    fee_detail = []
+    for r in trend_data:
+        fee_detail.append({
+            "period": r["period"],
+            "units": r.get("sales_volume_g", 0),
+            "revenue": r.get("net_revenue_eur", 0),
+            "rate": fee_info.get("rate", 0),
+            "fee": r.get("fee_amount", 0),
+        })
+
+    # Map breakdowns
+    cat_out = [{"category": r["category"], "revenue": r.get("net_revenue_eur", 0)} for r in breakdowns.get("categories", [])]
+    ori_out = [{"origin": r["origin"], "revenue": r.get("net_revenue_eur", 0)} for r in breakdowns.get("origins", [])]
+    pt_out = [{"tier": r["price_tier"], "volume": r.get("net_revenue_eur", 0)} for r in breakdowns.get("price_tiers", [])]
+    ppo_out = [{"num_products": r["products_per_order"], "count": r.get("order_count", 0)} for r in breakdowns.get("products_per_order", [])]
+
+    # Map products
+    prod_data = products.get("data", [])
+    prod_out = [{
+        "name": r.get("product_name"),
+        "brand": r.get("product_brand_name"),
+        "category": r.get("category"),
+        "origin": r.get("origin"),
+        "num_rx": r.get("prescriptions"),
+        "volume": r.get("volume_g"),
+        "revenue": r.get("revenue_eur"),
+        "net_revenue": r.get("net_revenue_eur"),
+        "epg": r.get("avg_eur_per_g"),
+        "gpx": r.get("avg_g_per_rx"),
+    } for r in prod_data]
+
+    # Map patients
+    nr = patients.get("new_returning", [])
+    # Aggregate new/returning across all periods
+    new_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "new")
+    ret_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "returning")
+    pat_nr = [{"status": "New", "count": new_total}, {"status": "Returning", "count": ret_total}]
+    pat_age = [{"age_segment": r["age_segment"], "count": r.get("patient_count", 0)} for r in patients.get("age_segments", [])]
+    pat_reg = [{"region": r["region"], "count": r.get("patient_count", 0)} for r in patients.get("regions", [])]
+
+    return {
+        "kpi": kpi,
+        "kpi_compare": kpi_compare,
+        "trend": trend_out,
+        "growth": growth_out,
+        "fee_detail": fee_detail,
+        "category": cat_out,
+        "origin": ori_out,
+        "price_tier": pt_out,
+        "ppo_dist": ppo_out,
+        "products": prod_out,
+        "patient_new_returning": pat_nr,
+        "patient_age": pat_age,
+        "patient_region": pat_reg,
+    }
+
+
+# ============================================================
 # RECONCILIATION API ROUTES (requires recon_auth session)
 # ============================================================
 @app.get("/api/recon/{slug}/summary")
