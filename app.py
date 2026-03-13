@@ -1078,7 +1078,7 @@ async def api_recon_combined(
     summary, trends, products, breakdowns, patients, pricing, platform_rx = await asyncio.gather(
         _get_summary(mfg_name, slug, start, end, category, cstart, cend),
         _get_trends(mfg_name, slug, start, end, category),
-        _get_products(mfg_name, slug, start, end),
+        _get_products(mfg_name, slug, start, end, category=category),
         _get_breakdowns(mfg_name, slug, start, end, category),
         _get_patients(mfg_name, slug, start, end, category),
         _get_pricing(mfg_name, slug, start, end, category),
