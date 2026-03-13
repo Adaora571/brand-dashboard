@@ -1,28 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 60">
   <defs>
-    <style>
-      .sanity-icon { fill: none; stroke: #181A1B; stroke-width: 2.5; }
-      .sanity-fill { fill: #181A1B; }
-      .sanity-text { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-weight: 800; font-size: 34px; fill: #181A1B; letter-spacing: -0.5px; }
-    </style>
+    <clipPath id="dome">
+      <circle cx="28" cy="32" r="23"/>
+    </clipPath>
   </defs>
 
-  <!-- Globe / circle emblem -->
-  <circle cx="45" cy="62" r="32" class="sanity-icon" stroke-linecap="round"/>
+  <g transform="translate(2, 0)">
+    <!-- DOME: 5 horizontal strips clipped to top-half of circle -->
+    <!-- Circle top at y=9, equator at y=32. 5 strips × 3px + 4 gaps × 2px = 23px -->
+    <g clip-path="url(#dome)">
+      <rect x="0" y="9"  width="56" height="3" fill="#181A1B"/>
+      <rect x="0" y="14" width="56" height="3" fill="#181A1B"/>
+      <rect x="0" y="19" width="56" height="3" fill="#181A1B"/>
+      <rect x="0" y="24" width="56" height="3" fill="#181A1B"/>
+      <rect x="0" y="29" width="56" height="3" fill="#181A1B"/>
+    </g>
 
-  <!-- Horizontal lines inside circle (3 stripes) -->
-  <line x1="17" y1="50" x2="73" y2="50" class="sanity-icon" stroke-linecap="round"/>
-  <line x1="14" y1="62" x2="76" y2="62" class="sanity-icon" stroke-linecap="round"/>
-  <line x1="17" y1="74" x2="73" y2="74" class="sanity-icon" stroke-linecap="round"/>
-
-  <!-- Leaf / petal shape sitting on top of the circle -->
-  <g class="sanity-fill">
-    <path d="M 38 32 Q 45 8 52 32 Q 48 22 45 18 Q 42 22 38 32 Z"
-          stroke="#181A1B" stroke-width="1.5" stroke-linejoin="round"/>
-    <!-- Central vein of leaf -->
-    <line x1="45" y1="18" x2="45" y2="32" stroke="#181A1B" stroke-width="1.2"/>
+    <!-- LEAVES: two curved petal shapes below dome -->
+    <path d="M 28,32 C 17,32 3,39 3,46 C 3,51 14,57 28,58" fill="#181A1B"/>
+    <path d="M 28,32 C 39,32 53,39 53,46 C 53,51 42,57 28,58" fill="#181A1B"/>
   </g>
 
-  <!-- Text: Sanity Group (bold, NOT italic) -->
-  <text x="95" y="73" class="sanity-text">Sanity Group</text>
+  <!-- Text -->
+  <text x="66" y="43" 
+        font-family="'Futura', 'Nunito Sans', 'Inter', -apple-system, sans-serif" 
+        font-weight="900" font-size="34" fill="#181A1B" 
+        letter-spacing="-0.3">Sanity Group</text>
 </svg>
