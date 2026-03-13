@@ -70,7 +70,7 @@ BRAND_HASHES = {
     "enua": "e3c9a2",
     "alephsana": "f6b1d8",
     "iuvo": "a8e4c3",
-    "avaay": "d2f7b6",
+    "sanitygroup": "d2f7b6",
 }
 
 # Reverse lookup: hashed_slug → slug
@@ -95,7 +95,7 @@ BRAND_CONFIG = {
     "enua":         {"color": "#193032", "logo": "/static/logos/enua.svg", "name": "enua", "logo_invert": False},
     "alephsana":    {"color": "#103C3A", "logo": "https://www.alephsana.com/wp-content/uploads/2023/02/AlephSana_Logo_Lockup_Stacked_alephGreen.svg", "name": "AlephSana", "logo_invert": True, "logo_height": 48},
     "iuvo":         {"color": "#000000", "logo": "https://cdn.prod.website-files.com/64231bdbeac474fbfe4ff7c7/642323c0d6586d71c14b9bda_IUVO-Logo.svg", "name": "IUVO", "logo_invert": False},
-    "avaay":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True},
+    "sanitygroup":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True},
 }
 
 # ============================================================
@@ -200,7 +200,7 @@ MANUFACTURER_PASSWORDS = {
     "enua":          os.getenv("TOKEN_ENUA",            "Kf6#pV2xJ8sT"),
     "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "Bq9$wM4rH7nC"),
     "iuvo":          os.getenv("TOKEN_IUVO",            "Zj5@tN8kD3vR"),
-    "avaay":         os.getenv("TOKEN_AVAAY",           "Lm7#gX2cF9pW"),
+    "sanitygroup":         os.getenv("TOKEN_AVAAY",           "Lm7#gX2cF9pW"),
 }
 
 # Password set dates — used for 90-day expiry. Default = today (first deploy).
@@ -219,7 +219,7 @@ MANUFACTURER_BQ_NAMES = {
     "enua":          "enua",
     "alephsana":     "AlephSana",
     "iuvo":          "IUVO",
-    "avaay":         "avaay Medical",
+    "sanitygroup":         "avaay Medical",
 }
 
 # ============================================================
@@ -270,7 +270,7 @@ MANUFACTURER_FEES = {
         "effective_date": "2025-03-01",
         "notes": "",
     },
-    "avaay": {
+    "sanitygroup": {
         "type": "advance", "rate": 0.375,
         "label": "€300k prepaid (800 kg)", "desc": "Advance — €300,000 for 800 kg",
         "effective_date": "2025-01-01",
