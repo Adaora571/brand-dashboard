@@ -129,8 +129,8 @@
   .kpi-card .label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
   .kpi-card .value { font-size:26px; font-weight:700; margin:8px 0 6px; color:var(--text); }
   .kpi-card .change { font-size:11px; font-weight:600; }
-  .kpi-card .change.up { color:var(--green); }
-  .kpi-card .change.down { color:var(--red); }
+  .kpi-card .change.up, .kpi-card .change .up { color:var(--green); }
+  .kpi-card .change.down, .kpi-card .change .down { color:var(--red); }
   .kpi-card .kpi-desc { font-size:11px; color:#94a3b8; margin-top:4px; }
   .chart-box { height:280px; position:relative; }
   .chart-box canvas { width:100%!important; height:100%!important; }
@@ -347,24 +347,8 @@
   </div>
 </div>
 
-<!-- SECTION 3: TRENDS -->
-<div class="section-title"><span class="num">3</span> Trends Over Time</div>
-<div class="grid grid-2">
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Revenue &amp; Volume</div><div class="chart-box"><canvas id="chartTrend"></canvas></div></div>
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">MoM Growth %</div><div class="chart-box"><canvas id="chartGrowth"></canvas></div></div>
-</div>
-
-<!-- SECTION 4: BREAKDOWNS -->
-<div class="section-title"><span class="num">4</span> Performance Breakdowns</div>
-<div class="grid grid-2">
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Category</div><div class="chart-box"><canvas id="chartCat"></canvas></div></div>
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Origin</div><div class="chart-box"><canvas id="chartOrigin"></canvas></div></div>
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Price Tier</div><div class="chart-box"><canvas id="chartPrice"></canvas></div></div>
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Products / Order</div><div class="chart-box"><canvas id="chartPPO"></canvas></div></div>
-</div>
-
-<!-- SECTION 5: PRODUCT PERFORMANCE -->
-<div class="section-title"><span class="num">5</span> Product Performance <span class="filter-tag" id="filterTag"></span></div>
+<!-- SECTION 3: PRODUCT PERFORMANCE -->
+<div class="section-title"><span class="num">3</span> Product Performance <span class="filter-tag" id="filterTag"></span></div>
 
 <div class="filter-bar">
   <div class="filter-group">
@@ -406,6 +390,22 @@
     </thead>
     <tbody id="prodBody"></tbody>
   </table>
+</div>
+
+<!-- SECTION 4: TRENDS -->
+<div class="section-title"><span class="num">4</span> Trends Over Time</div>
+<div class="grid grid-2">
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Revenue &amp; Volume</div><div class="chart-box"><canvas id="chartTrend"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">MoM Growth %</div><div class="chart-box"><canvas id="chartGrowth"></canvas></div></div>
+</div>
+
+<!-- SECTION 5: BREAKDOWNS -->
+<div class="section-title"><span class="num">5</span> Performance Breakdowns</div>
+<div class="grid grid-2">
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Category</div><div class="chart-box"><canvas id="chartCat"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Origin</div><div class="chart-box"><canvas id="chartOrigin"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Price Tier</div><div class="chart-box"><canvas id="chartPrice"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Products / Order</div><div class="chart-box"><canvas id="chartPPO"></canvas></div></div>
 </div>
 
 <!-- SECTION 6: PATIENT INSIGHTS -->
@@ -520,8 +520,8 @@ function render() {
   renderKPIs();
   renderDealTerms();
   renderFees();
-  renderCharts();
   renderProducts();
+  renderCharts();
   renderPatientCharts();
 }
 
@@ -530,13 +530,13 @@ function renderKPIs() {
   const kpiC = allData.kpi_compare?.[0] || {};
 
   document.getElementById('k-rx').textContent = formatNum(kpi.num_rx);
-  document.getElementById('k-rx-chg').textContent = formatChange(kpi.num_rx, kpiC.num_rx);
+  document.getElementById('k-rx-chg').innerHTML = formatChange(kpi.num_rx, kpiC.num_rx);
   document.getElementById('k-rev').textContent = formatCurr(kpi.revenue);
-  document.getElementById('k-rev-chg').textContent = formatChange(kpi.revenue, kpiC.revenue);
+  document.getElementById('k-rev-chg').innerHTML = formatChange(kpi.revenue, kpiC.revenue);
   document.getElementById('k-vol').textContent = formatNum(kpi.volume, 0);
-  document.getElementById('k-vol-chg').textContent = formatChange(kpi.volume, kpiC.volume);
+  document.getElementById('k-vol-chg').innerHTML = formatChange(kpi.volume, kpiC.volume);
   document.getElementById('k-net').textContent = formatCurr(kpi.net_revenue);
-  document.getElementById('k-net-chg').textContent = formatChange(kpi.net_revenue, kpiC.net_revenue);
+  document.getElementById('k-net-chg').innerHTML = formatChange(kpi.net_revenue, kpiC.net_revenue);
 
   document.getElementById('k-fee').textContent = formatCurr(kpi.total_fee || 0);
   document.getElementById('k-ppo').textContent = (kpi.ppo || 0).toFixed(1);
@@ -554,8 +554,8 @@ function renderDealTerms() {
     return;
   }
 
-  document.getElementById('dealValue').textContent = fee.display || fee.rate + '%';
-  document.getElementById('dealDesc').textContent = fee.description || '';
+  document.getElementById('dealValue').textContent = fee.label || fee.rate + '%';
+  document.getElementById('dealDesc').textContent = fee.desc || '';
   document.getElementById('dealType').textContent = fee.type || 'Fixed';
   document.getElementById('dealCalc').textContent = '€ ' + formatNum(allData.kpi?.[0]?.total_fee || 0);
 }
@@ -570,15 +570,19 @@ function renderFees() {
   let html = '';
   let totVol = 0, totRev = 0, totFee = 0;
 
+  const feeInfo = FEES_DATA[selectedBrandSlug] || {};
   currentFees.forEach(row => {
     totVol += row.units || 0;
     totRev += row.revenue || 0;
     totFee += row.fee || 0;
+    const rateDisplay = feeInfo.type === 'per_gram' ? ('€' + row.rate.toFixed(2) + '/g')
+      : feeInfo.type === 'percentage' ? ((row.rate * 100).toFixed(2) + '%')
+      : feeInfo.label || '—';
     html += `<tr>
       <td>${row.period || '—'}</td>
       <td class="r">${formatNum(row.units)}</td>
       <td class="r">${formatCurr(row.revenue)}</td>
-      <td class="r">${row.rate ? (row.rate * 100).toFixed(1) + '%' : '—'}</td>
+      <td class="r">${rateDisplay}</td>
       <td class="r">${formatCurr(row.fee)}</td>
     </tr>`;
   });
@@ -612,18 +616,19 @@ function renderTrendChart() {
         {
           label: 'Revenue (€)',
           data: trend.map(x => x.revenue),
-          backgroundColor: COLORS.blue,
+          backgroundColor: trend.map((_, i) => PALETTE[i % PALETTE.length]),
           yAxisID: 'y',
         },
         {
           label: 'Volume (g)',
           data: trend.map(x => x.volume),
-          borderColor: COLORS.teal,
+          borderColor: '#13375E',
           borderWidth: 2,
           type: 'line',
           yAxisID: 'y1',
           fill: false,
           tension: 0.3,
+          pointBackgroundColor: '#13375E',
         }
       ]
     },
@@ -722,7 +727,7 @@ function renderOriginChart() {
       datasets: [{
         label: 'Revenue (€)',
         data: orig.map(x => x.revenue),
-        backgroundColor: COLORS.purple,
+        backgroundColor: orig.map((_, i) => PALETTE[i % PALETTE.length]),
       }]
     },
     options: {
@@ -746,7 +751,7 @@ function renderPriceTierChart() {
       datasets: [{
         label: 'Volume (g)',
         data: tier.map(x => x.volume),
-        backgroundColor: COLORS.teal,
+        backgroundColor: tier.map((_, i) => PALETTE[i % PALETTE.length]),
       }]
     },
     options: {
@@ -769,7 +774,7 @@ function renderPPOChart() {
       datasets: [{
         label: 'Count',
         data: ppo.map(x => x.count),
-        backgroundColor: COLORS.green,
+        backgroundColor: ppo.map((_, i) => PALETTE[i % PALETTE.length]),
       }]
     },
     options: {
@@ -816,7 +821,7 @@ function renderAgeChart() {
       datasets: [{
         label: 'Count',
         data: data.map(x => x.count),
-        backgroundColor: COLORS.orange,
+        backgroundColor: data.map((_, i) => PALETTE[i % PALETTE.length]),
       }]
     },
     options: {
@@ -839,7 +844,7 @@ function renderRegionChart() {
       datasets: [{
         label: 'Patients',
         data: data.map(x => x.count),
-        backgroundColor: COLORS.purple,
+        backgroundColor: data.map((_, i) => PALETTE[i % PALETTE.length]),
       }]
     },
     options: {
@@ -857,8 +862,9 @@ function renderProducts() {
     return;
   }
 
+  const displayProducts = currentProducts.slice(0, 15);
   let html = '';
-  currentProducts.forEach(prod => {
+  displayProducts.forEach(prod => {
     html += `<tr>
       <td>${prod.name || '—'}</td>
       <td>${prod.brand || '—'}</td>
@@ -873,7 +879,7 @@ function renderProducts() {
     </tr>`;
   });
   document.getElementById('prodBody').innerHTML = html;
-  document.getElementById('prodCount').textContent = `Showing ${currentProducts.length} products`;
+  document.getElementById('prodCount').textContent = `Showing ${displayProducts.length} of ${currentProducts.length} products`;
 }
 
 function applyProductFilters() {
