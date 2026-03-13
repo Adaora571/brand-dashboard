@@ -211,6 +211,8 @@ MANUFACTURER_PASSWORD_SET = {
 }
 
 # Slug → actual BigQuery product_manufacturer_name
+# Use a list to combine multiple BQ manufacturer names into one dashboard
+# (e.g. company rebranding where old data still uses the old name).
 MANUFACTURER_BQ_NAMES = {
     "cannamedical":  "Cannamedical",
     "four20":        "Four 20 Pharma",
@@ -219,8 +221,26 @@ MANUFACTURER_BQ_NAMES = {
     "enua":          "enua",
     "alephsana":     "AlephSana",
     "iuvo":          "IUVO",
-    "sanitygroup":         "Sanity Group",
+    "sanitygroup":   ["Sanity Group", "avaay Medical"],
 }
+
+
+def mfg_clause(mfg_name):
+    """Build manufacturer WHERE clause and query params.
+
+    Handles both single name (str) and multiple names (list).
+    When a list is provided, uses IN UNNEST() to match any of the names,
+    which merges data from multiple BQ manufacturer entries into one view.
+    """
+    if isinstance(mfg_name, list):
+        return (
+            "oi.product_manufacturer_name IN UNNEST(@mfg_names)",
+            [bigquery.ArrayQueryParameter("mfg_names", "STRING", mfg_name)],
+        )
+    return (
+        "oi.product_manufacturer_name = @mfg",
+        [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)],
+    )
 
 # ============================================================
 # ★ DEAL TERMS — EASY TO EDIT ★
@@ -503,6 +523,8 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         cs = s
         ce = e
 
+    mfg_where, mfg_p = mfg_clause(mfg_name)
+
     sql = f"""
     WITH curr AS (
       SELECT
@@ -518,7 +540,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+      WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     ),
     repeat_stats AS (
       SELECT
@@ -531,14 +553,14 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SELECT DISTINCT o.customer_id
         FROM `{PROJECT_DATASET}.order_items` oi
         JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-        WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+        WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
       ) period_customers
       JOIN (
         -- Count LIFETIME orders per customer (no date filter)
         SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS lifetime_orders
         FROM `{PROJECT_DATASET}.order_items` oi
         JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-        WHERE oi.product_manufacturer_name = @mfg {NET_ORDER_FILTER}
+        WHERE {mfg_where} {NET_ORDER_FILTER}
         GROUP BY 1
       ) lifetime ON period_customers.customer_id = lifetime.customer_id
     ),
@@ -550,7 +572,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg {NET_ORDER_FILTER}
+      WHERE {mfg_where} {NET_ORDER_FILTER}
         AND {compare_clause}
         {"AND oi.product_vertical = @category" if category else ""}
     )
@@ -561,8 +583,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     FROM curr c, prev p, repeat_stats rp
     """
 
-    params = [
-        bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name),
+    params = mfg_p + [
         bigquery.ScalarQueryParameter("comp_start", "DATE", cs),
         bigquery.ScalarQueryParameter("comp_end", "DATE", ce),
     ] + date_p
@@ -625,6 +646,7 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
         return cached
 
     date_where, date_p = date_params(start_date, end_date, category)
+    mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
     SELECT
@@ -638,10 +660,10 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
       SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY period ORDER BY period
     """
-    params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
+    params = mfg_p + date_p
     rows = run_query(sql, params)
 
     fee = MANUFACTURER_FEES.get(slug, {})
@@ -674,6 +696,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
         return cached
 
     date_where, date_p = date_params(start_date, end_date)
+    mfg_where, mfg_p = mfg_clause(mfg_name)
 
     extra_where = ""
     extra_params = []
@@ -705,11 +728,11 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
       SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_rx
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {extra_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {extra_where} {NET_ORDER_FILTER}
     GROUP BY 1,2,3,4
     ORDER BY revenue_eur DESC
     """
-    params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p + extra_params
+    params = mfg_p + date_p + extra_params
     result = {"data": run_query(sql, params)}
     cache_set(ck, result)
     return result
@@ -738,14 +761,15 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
         return cached
 
     date_where, date_p = date_params(start_date, end_date, category)
-    base_params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
+    mfg_where, mfg_p = mfg_clause(mfg_name)
+    base_params = mfg_p + date_p
 
     cat_sql = f"""
     SELECT oi.product_vertical AS category,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
     ori_sql = f"""
@@ -753,7 +777,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
     pt_sql = f"""
@@ -768,7 +792,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY 1
     """
     ppo_sql = f"""
@@ -777,7 +801,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
       SELECT o.order_id, LEAST(COUNT(oi.order_item_id), 4) AS items
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+      WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
       GROUP BY 1
     ) GROUP BY 1 ORDER BY 1
     """
@@ -817,14 +841,15 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
         return cached
 
     date_where, date_p = date_params(start_date, end_date, category)
-    base_params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
+    mfg_where, mfg_p = mfg_clause(mfg_name)
+    base_params = mfg_p + date_p
 
     nr_sql = f"""
     WITH first_order AS (
       SELECT o.customer_id, MIN(DATE(o.created_at)) AS first_date
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-      WHERE oi.product_manufacturer_name = @mfg {NET_ORDER_FILTER}
+      WHERE {mfg_where} {NET_ORDER_FILTER}
         {"AND oi.product_vertical = @category" if category else ""}
       GROUP BY 1
     )
@@ -835,7 +860,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     JOIN first_order f ON o.customer_id = f.customer_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1,2 ORDER BY 1,2
     """
     age_sql = f"""
@@ -852,7 +877,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       COUNT(DISTINCT o.customer_id) AS patient_count
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY 1
     """
     reg_sql = f"""
@@ -860,7 +885,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       COUNT(DISTINCT o.customer_id) AS patient_count
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
       AND o.shipping_address.region IS NOT NULL
       AND TRIM(o.shipping_address.region) != ''
     GROUP BY 1 ORDER BY patient_count DESC LIMIT 15
@@ -899,6 +924,7 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
         return cached
 
     date_where, date_p = date_params(start_date, end_date, category)
+    mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
     SELECT
@@ -906,10 +932,10 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
       SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name = @mfg {date_where} {NET_ORDER_FILTER}
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY period ORDER BY period
     """
-    params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)] + date_p
+    params = mfg_p + date_p
     result = {"data": run_query(sql, params)}
     cache_set(ck, result)
     return result
@@ -927,15 +953,15 @@ async def api_pricing(request: Request, hashed_slug: str, start_date: str = "", 
 # ============================================================
 async def _get_categories(mfg_name: str):
     """Internal helper for categories query, used by both brand and recon APIs."""
+    mfg_where, mfg_p = mfg_clause(mfg_name)
     sql = f"""
     SELECT DISTINCT oi.product_vertical AS category
     FROM `{PROJECT_DATASET}.order_items` oi
-    WHERE oi.product_manufacturer_name = @mfg
+    WHERE {mfg_where}
       AND oi.product_vertical IS NOT NULL
     ORDER BY 1
     """
-    params = [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)]
-    rows = run_query(sql, params)
+    rows = run_query(sql, mfg_p)
     return {"categories": [r["category"] for r in rows]}
 
 
