@@ -309,7 +309,7 @@
 <div class="section-title"><span class="num">1</span> Top-Line KPIs</div>
 <div class="grid grid-4" id="kpiGrid">
   <div class="card kpi-card accent-blue"><div class="label"># Prescriptions</div><div class="value" id="k-rx">—</div><div class="change" id="k-rx-chg"></div><div class="kpi-desc">Net orders (excl. voided &amp; returned)</div></div>
-  <div class="card kpi-card accent-teal"><div class="label">Revenue (€)</div><div class="value" id="k-rev">—</div><div class="change" id="k-rev-chg"></div><div class="kpi-desc">Gross revenue incl. VAT</div></div>
+  <div class="card kpi-card accent-teal"><div class="label">Gross Revenue (€)</div><div class="value" id="k-rev">—</div><div class="change" id="k-rev-chg"></div><div class="kpi-desc">Incl. VAT, before discounts</div></div>
   <div class="card kpi-card accent-green"><div class="label">Sales Volume (g)</div><div class="value" id="k-vol">—</div><div class="change" id="k-vol-chg"></div><div class="kpi-desc">Net grams (excl. voided &amp; returned)</div></div>
   <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">Excl. discounts, taxes &amp; refunds</div></div>
 </div>
@@ -324,7 +324,7 @@
 <!-- SECTION 2: TRENDS -->
 <div class="section-title"><span class="num">2</span> Trends Over Time</div>
 <div class="grid grid-2">
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Revenue & Volume</div><div class="chart-box"><canvas id="chartTrend"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Gross Revenue & Volume</div><div class="chart-box"><canvas id="chartTrend"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">MoM Growth %</div><div class="chart-box"><canvas id="chartGrowth"></canvas></div></div>
 </div>
 
@@ -386,7 +386,7 @@
 <div class="grid grid-3">
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box"><canvas id="chartPatients"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Age Segments</div><div class="chart-box"><canvas id="chartAge"></canvas></div></div>
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Region <span style="font-weight:400;color:var(--muted);font-size:11px;">(Unique Patients)</span></div><div class="chart-box"><canvas id="chartRegion"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Region <span style="font-weight:400;color:var(--muted);font-size:11px;">(Unique Patients)</span></div><div class="chart-box" style="height:420px;"><canvas id="chartRegion"></canvas></div></div>
 </div>
 
 </div><!-- /container -->
@@ -869,7 +869,7 @@ function renderTrends(data) {
   const isGenericUnit = (u === 'units');
   const volLabel = (specific && !isGenericUnit) ? 'Volume ('+u+')' : 'Volume';
   const yTitle = (specific && !isGenericUnit) ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
-  createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:volLabel,data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:yTitle},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:volLabel,data:rows.map(r=>r.sales_volume_g),backgroundColor:COLORS.teal+'66',borderColor:COLORS.teal,borderWidth:1,yAxisID:'y'},{label:'Gross Revenue (€)',data:rows.map(r=>r.revenue_eur),type:'line',borderColor:COLORS.blue,backgroundColor:COLORS.blue+'22',borderWidth:2,pointRadius:4,yAxisID:'y1',fill:true}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',title:{display:true,text:yTitle},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',title:{display:true,text:'€'},grid:{drawOnChartArea:false},ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
   createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'Revenue %',data:gR,borderColor:COLORS.blue,borderWidth:2,pointRadius:3,tension:0.3},{label:'Volume %',data:gV,borderColor:COLORS.teal,borderWidth:2,pointRadius:3,tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
@@ -933,7 +933,7 @@ function renderPatients(data) {
   createOrUpdate('chartAge',{type:'bar',data:{labels:age.map(a=>a.age_segment),datasets:[{label:'Patients',data:age.map(a=>a.patient_count),backgroundColor:PALETTE.slice(0,age.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
   const reg=(data.regions||[]).filter(r=>r.region && r.region.trim());
   populateSelect('filterRegion', reg.map(r=>r.region).filter(Boolean).sort(), 'All Regions');
-  if(reg.length>0) createOrUpdate('chartRegion',{type:'bar',data:{labels:reg.map(r=>r.region),datasets:[{label:'Patients',data:reg.map(r=>r.patient_count),backgroundColor:PALETTE.slice(0,reg.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}}}});
+  if(reg.length>0) createOrUpdate('chartRegion',{type:'bar',data:{labels:reg.map(r=>r.region),datasets:[{label:'Patients',data:reg.map(r=>r.patient_count),backgroundColor:PALETTE.slice(0,reg.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{y:{ticks:{autoSkip:false,font:{size:11}}}}}});
 }
 
 // ============================================================
