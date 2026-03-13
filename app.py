@@ -980,32 +980,6 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
 
 
 # ============================================================
-# TEMPORARY DEBUG — manufacturer hierarchy (remove after use)
-# ============================================================
-@app.get("/api/debug/hierarchy")
-async def debug_hierarchy():
-    """Temporary: show manufacturer/brand/category hierarchy for SG + avaay."""
-    sql = f"""
-    SELECT
-      oi.product_manufacturer_name AS manufacturer,
-      oi.product_brand_name AS brand,
-      oi.product_vertical AS category,
-      COUNT(DISTINCT oi.product_name) AS num_products,
-      COUNT(DISTINCT o.order_id) AS rx_count,
-      MIN(DATE(o.created_at)) AS first_order,
-      MAX(DATE(o.created_at)) AS last_order
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE oi.product_manufacturer_name IN ('Sanity Group', 'avaay Medical')
-      {NET_ORDER_FILTER}
-    GROUP BY 1, 2, 3
-    ORDER BY 1, 2, 3
-    """
-    rows = run_query(sql, [])
-    return rows
-
-
-# ============================================================
 # RECONCILIATION DASHBOARD (HTV Admin only)
 # ============================================================
 HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "HtvRecon2026!")
