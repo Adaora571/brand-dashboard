@@ -342,6 +342,8 @@ def get_display_name(slug: str) -> str:
 
 def calc_fee(fee_info: dict, volume_g, revenue, months: int = 1) -> float:
     """Calculate fee based on deal terms."""
+    if not fee_info or "type" not in fee_info:
+        return 0
     t = fee_info["type"]
     r = fee_info["rate"]
     vol = float(volume_g or 0)
