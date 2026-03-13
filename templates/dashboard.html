@@ -24,7 +24,7 @@
   }
   .header h1 { font-size:22px; font-weight:700; }
   .header .subtitle { color:rgba(255,255,255,0.65); font-size:12px; margin-top:2px; }
-  .brand-logo { height:36px; max-width:180px; object-fit:contain; }
+  .brand-logo { height:48px; max-width:220px; object-fit:contain; }
   .brand-logo.invert { filter:brightness(0) invert(1); }
   .brand-title-row { display:flex; align-items:center; gap:14px; }
   .logout-btn { color:rgba(255,255,255,0.55); padding:6px 12px; border-radius:8px; transition:all 0.2s; text-decoration:none; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; }
@@ -313,10 +313,10 @@
   <div class="card kpi-card accent-green"><div class="label">Sales Volume (g)</div><div class="value" id="k-vol">—</div><div class="change" id="k-vol-chg"></div><div class="kpi-desc">Net grams (excl. voided &amp; returned)</div></div>
   <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">Excl. discounts, taxes &amp; refunds</div></div>
 </div>
-<div class="grid grid-3" style="margin-top:16px;">
-  <div class="card kpi-card accent-teal"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="kpi-desc">Net Revenue / Volume</div></div>
-  <div class="card kpi-card accent-purple"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
-  <div class="card kpi-card accent-teal"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="kpi-desc">Patients with 2+ lifetime orders</div></div>
+<div class="grid grid-3" style="margin-top:12px;max-width:900px;">
+  <div class="card kpi-card accent-teal" style="padding:14px 18px;"><div class="label">Avg € / Gram</div><div class="value" style="font-size:22px;margin:4px 0 4px;" id="k-epg">—</div><div class="kpi-desc">Net Revenue / Volume</div></div>
+  <div class="card kpi-card accent-purple" style="padding:14px 18px;"><div class="label">Total Patients</div><div class="value" style="font-size:22px;margin:4px 0 4px;" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
+  <div class="card kpi-card accent-teal" style="padding:14px 18px;"><div class="label">Repeat Purchase Rate</div><div class="value" style="font-size:22px;margin:4px 0 4px;" id="k-rpr">—</div><div class="kpi-desc">Patients with 2+ lifetime orders</div></div>
 </div>
 
 <!-- SECTION 2: TRENDS -->
@@ -382,8 +382,8 @@
 <!-- SECTION 6: PATIENTS -->
 <div class="section-title"><span class="num">5</span> Patient Insights</div>
 <div class="grid grid-3">
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box" style="height:420px;"><canvas id="chartPatients"></canvas></div></div>
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Age Segments</div><div class="chart-box" style="height:420px;"><canvas id="chartAge"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box" style="height:340px;"><canvas id="chartPatients"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Age Segments</div><div class="chart-box" style="height:340px;"><canvas id="chartAge"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Region <span style="font-weight:400;color:var(--muted);font-size:11px;">(Unique Patients)</span></div><div class="chart-box" style="height:420px;"><canvas id="chartRegion"></canvas></div></div>
 </div>
 
