@@ -1336,8 +1336,21 @@ function sortColumn(table, colIndex, asc) {
 }
 
 // Date picker functions
+// ── Date picker state ──
+let dpActivePreset = 'ytd';
+let dpCompareOn = true;
+let dpCompareMode = 'prev';
+
 function toggleDatePanel() {
-  document.getElementById('datePanel').classList.toggle('open');
+  const panel = document.getElementById('datePanel');
+  if (panel.classList.contains('open')) {
+    panel.classList.remove('open');
+  } else {
+    document.getElementById('dpFrom').value = document.getElementById('startDate').value;
+    document.getElementById('dpTo').value = document.getElementById('endDate').value;
+    updateCompareInfo();
+    panel.classList.add('open');
+  }
 }
 
 function cancelDatePanel() {
@@ -1348,42 +1361,76 @@ function applyDatePanel() {
   const from = document.getElementById('dpFrom').value;
   const to = document.getElementById('dpTo').value;
   if (!from || !to) return;
+
   document.getElementById('startDate').value = from;
   document.getElementById('endDate').value = to;
-  // Calculate comparison dates (same length period before the selected range)
-  const cmpOn = document.getElementById('compareToggle')?.classList.contains('on');
-  if (cmpOn) {
-    const cmp = getCompareDates(from, to);
-    document.getElementById('compareStart').value = cmp.start;
-    document.getElementById('compareEnd').value = cmp.end;
-  } else {
-    document.getElementById('compareStart').value = '';
-    document.getElementById('compareEnd').value = '';
-  }
-  document.getElementById('dateTriggerText').textContent = formatDateRange(from, to);
+
+  const cmp = getCompareDates(from, to);
+  document.getElementById('compareStart').value = dpCompareOn ? cmp.start : '';
+  document.getElementById('compareEnd').value = dpCompareOn ? cmp.end : '';
+
+  updateTriggerText(from, to);
   document.getElementById('datePanel').classList.remove('open');
   loadAll();
 }
 
-function getCompareDates(startStr, endStr) {
-  const start = new Date(startStr);
-  const end = new Date(endStr);
-  const diffMs = end - start;
-  const diffDays = Math.round(diffMs / (1000*60*60*24));
-  const cEnd = new Date(start); cEnd.setDate(cEnd.getDate() - 1);
-  const cStart = new Date(cEnd); cStart.setDate(cStart.getDate() - diffDays);
-  return { start: cStart.toISOString().slice(0,10), end: cEnd.toISOString().slice(0,10) };
+function getCompareDates(fromStr, toStr) {
+  const from = new Date(fromStr + 'T00:00:00');
+  const to = new Date(toStr + 'T00:00:00');
+  const daySpan = Math.round((to - from) / 86400000);
+
+  let cStart, cEnd;
+  switch (dpCompareMode) {
+    case 'prev':
+      cEnd = isoDate(addDays(from, -1));
+      cStart = isoDate(addDays(from, -daySpan - 1));
+      break;
+    case 'mom':
+      cStart = isoDate(addMonths(from, -1));
+      cEnd = isoDate(addMonths(to, -1));
+      break;
+    case 'wow':
+      cStart = isoDate(addDays(from, -7));
+      cEnd = isoDate(addDays(to, -7));
+      break;
+    case 'dod':
+      cStart = isoDate(addDays(from, -1));
+      cEnd = isoDate(addDays(to, -1));
+      break;
+    case 'yoy':
+      cStart = isoDate(addYears(from, -1));
+      cEnd = isoDate(addYears(to, -1));
+      break;
+    default:
+      cEnd = isoDate(addDays(from, -1));
+      cStart = isoDate(addDays(from, -daySpan - 1));
+  }
+  return { start: cStart, end: cEnd };
+}
+
+function updateCompareInfo() {
+  const from = document.getElementById('dpFrom').value;
+  const to = document.getElementById('dpTo').value;
+  if (!from || !to) return;
+  const cmp = getCompareDates(from, to);
+  document.getElementById('compareRangeText').textContent = fmtShort(cmp.start) + ' – ' + fmtShort(cmp.end);
+}
+
+function updateTriggerText(from, to) {
+  document.getElementById('dateTriggerText').textContent = fmtShort(from) + ' – ' + fmtShort(to);
+  const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year' };
+  document.getElementById('dateTriggerCompare').textContent = dpCompareOn ? (cmpLabels[dpCompareMode] || '') : '';
 }
 
 function selectPreset(btn) {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  const preset = btn.dataset.preset;
+  dpActivePreset = btn.dataset.preset;
   const today = new Date();
   let from, to;
   to = today.toISOString().slice(0,10);
 
-  switch(preset) {
+  switch(dpActivePreset) {
     case 'today':
       from = to; break;
     case 'yesterday': {
@@ -1413,23 +1460,51 @@ function selectPreset(btn) {
       from = d.toISOString().slice(0,10); break;
     }
     case 'custom':
-      return; // User will set custom dates manually
+      return;
     default:
       from = today.getFullYear() + '-01-01';
   }
 
   document.getElementById('dpFrom').value = from;
   document.getElementById('dpTo').value = to;
+  updateCompareInfo();
 }
 
 function setCompareMode(btn) {
   document.querySelectorAll('.compare-opt').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  dpCompareMode = btn.dataset.cmp;
+  updateCompareInfo();
 }
 
 function toggleCompare() {
-  document.getElementById('compareToggle').classList.toggle('on');
+  const toggle = document.getElementById('compareToggle');
+  toggle.classList.toggle('on');
+  dpCompareOn = toggle.classList.contains('on');
+  document.getElementById('compareOptions').style.opacity = dpCompareOn ? 1 : 0.4;
+  document.getElementById('compareOptions').style.pointerEvents = dpCompareOn ? 'auto' : 'none';
+  document.getElementById('compareInfo').style.display = dpCompareOn ? 'block' : 'none';
 }
+
+// ── Date helpers ──
+function isoDate(d) { return d.toISOString().slice(0,10); }
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+function addMonths(d, n) { const r = new Date(d); r.setMonth(r.getMonth()+n); return r; }
+function addYears(d, n) { const r = new Date(d); r.setFullYear(r.getFullYear()+n); return r; }
+function fmtShort(dateStr) {
+  if (!dateStr) return '';
+  const [y,m,d] = dateStr.split('-');
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return months[parseInt(m)-1] + ' ' + parseInt(d) + ', ' + y;
+}
+
+// Close date panel on outside click
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('datePanel');
+  if (panel && panel.classList.contains('open') && !e.target.closest('.date-trigger') && !e.target.closest('.date-panel')) {
+    panel.classList.remove('open');
+  }
+});
 
 // Utility functions
 function formatNum(n, decimals = 0) {
@@ -1455,12 +1530,6 @@ function formatChange(curr, prev) {
   return `<span class="${cls}">${sym}${Math.abs(pct)}%</span>`;
 }
 
-function formatDateRange(from, to) {
-  const f = new Date(from);
-  const t = new Date(to);
-  const formatter = new Intl.DateTimeFormat('en-EU', { month: 'short', day: 'numeric' });
-  return formatter.format(f) + ' – ' + formatter.format(t) + ', ' + t.getFullYear();
-}
 </script>
 
 </body>
