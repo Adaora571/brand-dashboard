@@ -221,7 +221,7 @@ MANUFACTURER_BQ_NAMES = {
     "enua":          "enua",
     "alephsana":     "AlephSana",
     "iuvo":          "IUVO",
-    "sanitygroup":   ["Sanity Group", "avaay Medical"],
+    "sanitygroup":   ["Sanity Group", "avaay Medical", "Vayamed"],
 }
 
 
