@@ -835,9 +835,7 @@ function renderSummary(data) {
   document.getElementById('k-rev').textContent = fmt(c.revenue_eur,'€');
   document.getElementById('k-vol').textContent = fmt(c.sales_volume_g,'',vSuffix);
   document.getElementById('k-net').textContent = fmt(c.net_revenue_eur,'€');
-  document.getElementById('k-gpx').textContent = c.avg_g_per_prescription!=null?parseFloat(c.avg_g_per_prescription).toFixed(1)+(vSuffix):'—';
   document.getElementById('k-epg').textContent = c.avg_eur_per_g!=null?'€'+parseFloat(c.avg_eur_per_g).toFixed(2):'—';
-  document.getElementById('k-aov').textContent = c.avg_order_value!=null?'€'+parseFloat(c.avg_order_value).toFixed(2):'—';
   document.getElementById('k-pat').textContent = fmt(c.total_patients);
   document.getElementById('k-rpr').textContent = c.repeat_purchase_rate!=null?(c.repeat_purchase_rate*100).toFixed(1)+'%':'—';
   setChg('k-rx-chg',g.prescriptions); setChg('k-rev-chg',g.revenue); setChg('k-vol-chg',g.volume); setChg('k-net-chg',g.net_revenue);
@@ -848,13 +846,11 @@ function renderSummary(data) {
     const uCap = u.charAt(0).toUpperCase() + u.slice(1);
     document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume ('+uCap+')';
     document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net '+uFull+' (excl. voided & returned)';
-    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg '+uCap+' / Prescription';
     document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / '+uCap;
   } else {
     // Vapes, mixed, or no category — clean "Units" style
     document.querySelector('#k-vol').closest('.kpi-card').querySelector('.label').textContent = 'Sales Volume (Units)';
     document.querySelector('#k-vol').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net units (excl. voided & returned)';
-    document.querySelector('#k-gpx').closest('.kpi-card').querySelector('.label').textContent = 'Avg Units / Prescription';
     document.querySelector('#k-epg').closest('.kpi-card').querySelector('.label').textContent = 'Avg € / Unit';
   }
   document.querySelector('#k-epg').closest('.kpi-card').querySelector('.kpi-desc').textContent = 'Net Revenue / Volume';
