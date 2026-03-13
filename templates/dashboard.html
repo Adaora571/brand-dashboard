@@ -379,8 +379,11 @@
 
 <!-- SECTION 5: BREAKDOWNS -->
 <div class="section-title"><span class="num">4</span> Breakdowns</div>
-<div class="grid grid-3">
+<div class="grid grid-2">
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Brand <span style="font-weight:400;color:var(--muted);font-size:11px;">(Net Revenue €)</span></div><div class="chart-box"><canvas id="chartBrand"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Category <span style="font-weight:400;color:var(--muted);font-size:11px;">(Net Revenue €)</span></div><div class="chart-box"><canvas id="chartCat"></canvas></div></div>
+</div>
+<div class="grid grid-2" style="margin-top:16px;">
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Origin <span style="font-weight:400;color:var(--muted);font-size:11px;">(Net Revenue €)</span></div><div class="chart-box"><canvas id="chartOrigin"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Price Tier <span style="font-weight:400;color:var(--muted);font-size:11px;">(Net Revenue €)</span></div><div class="chart-box"><canvas id="chartPrice"></canvas></div></div>
 </div>
@@ -940,6 +943,8 @@ function updateUnitHeaders() {
 }
 
 function renderBreakdowns(data) {
+  const brands=data.brands||[];
+  if(brands.length>0) createOrUpdate('chartBrand',{type:'bar',data:{labels:brands.map(b=>b.brand||'Unknown'),datasets:[{label:'Net Rev €',data:brands.map(b=>b.net_revenue_eur),backgroundColor:PALETTE.slice(0,brands.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const cats=data.categories||[];
   createOrUpdate('chartCat',{type:'doughnut',data:{labels:cats.map(c=>c.category||'Unknown'),datasets:[{data:cats.map(c=>c.net_revenue_eur),backgroundColor:PALETTE.slice(0,cats.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}});
   const ori=data.origins||[];

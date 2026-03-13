@@ -749,7 +749,7 @@ async def api_products(
 
 
 # ============================================================
-# API: Breakdowns (category, origin, price tier, products/order) (Helper)
+# API: Breakdowns (category, origin, price tier, products/order, brand) (Helper)
 # ============================================================
 async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
     """Internal helper for breakdowns query, used by both brand and recon APIs."""
@@ -805,18 +805,29 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
       GROUP BY 1
     ) GROUP BY 1 ORDER BY 1
     """
-    # Run all 4 queries in parallel instead of sequentially
-    cats, oris, pts, ppos = await asyncio.gather(
+    brand_sql = f"""
+    SELECT COALESCE(oi.product_brand_name, 'Unknown') AS brand,
+      COUNT(DISTINCT oi.order_id) AS prescriptions,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+    FROM `{PROJECT_DATASET}.order_items` oi
+    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
+    GROUP BY 1 ORDER BY net_revenue_eur DESC
+    """
+    # Run all 5 queries in parallel instead of sequentially
+    cats, oris, pts, ppos, brands = await asyncio.gather(
         run_query_async(cat_sql, list(base_params)),
         run_query_async(ori_sql, list(base_params)),
         run_query_async(pt_sql, list(base_params)),
         run_query_async(ppo_sql, list(base_params)),
+        run_query_async(brand_sql, list(base_params)),
     )
     result = {
         "categories": cats,
         "origins": oris,
         "price_tiers": pts,
         "products_per_order": ppos,
+        "brands": brands,
     }
     cache_set(ck, result)
     return result
@@ -1124,6 +1135,7 @@ async def api_recon_combined(
     ori_out = [{"origin": r["origin"], "revenue": r.get("net_revenue_eur", 0)} for r in breakdowns.get("origins", [])]
     pt_out = [{"tier": r["price_tier"], "volume": r.get("net_revenue_eur", 0)} for r in breakdowns.get("price_tiers", [])]
     ppo_out = [{"num_products": r["products_per_order"], "count": r.get("order_count", 0)} for r in breakdowns.get("products_per_order", [])]
+    brand_out = [{"brand": r["brand"], "prescriptions": r.get("prescriptions", 0), "net_revenue_eur": r.get("net_revenue_eur", 0)} for r in breakdowns.get("brands", [])]
 
     # Map products
     prod_data = products.get("data", [])
@@ -1159,6 +1171,7 @@ async def api_recon_combined(
         "origin": ori_out,
         "price_tier": pt_out,
         "ppo_dist": ppo_out,
+        "brands": brand_out,
         "products": prod_out,
         "patient_new_returning": pat_nr,
         "patient_age": pat_age,
