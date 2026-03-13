@@ -813,10 +813,28 @@ function renderFeeChart() {
   });
 }
 
+function wrapLabel(text, maxLen) {
+  // Split a long label into an array of lines for Chart.js multi-line support
+  if (!text || text.length <= maxLen) return text;
+  const words = text.split(/(\s+|-(?=\S))/);
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    if ((line + w).trim().length > maxLen && line.trim().length > 0) {
+      lines.push(line.trim());
+      line = w.trimStart();
+    } else {
+      line += w;
+    }
+  }
+  if (line.trim()) lines.push(line.trim());
+  return lines.length > 1 ? lines.slice(0, 2) : text;  // max 2 lines
+}
+
 function renderTop5ProductChart() {
   const prods = (allData.products || []).filter(p => p.net_revenue > 0);
   const sorted = [...prods].sort((a, b) => b.net_revenue - a.net_revenue).slice(0, 5);
-  const labels = sorted.map(p => p.name || 'Unknown');
+  const labels = sorted.map(p => wrapLabel(p.name || 'Unknown', 35));
   const values = sorted.map(p => p.net_revenue);
   const totalRev = prods.reduce((s, p) => s + p.net_revenue, 0);
 
@@ -832,6 +850,7 @@ function renderTop5ProductChart() {
         data: values,
         backgroundColor: sorted.map((_, i) => PALETTE[i % PALETTE.length]),
         borderRadius: 4,
+        barThickness: 22,
       }]
     },
     options: {
@@ -842,6 +861,11 @@ function renderTop5ProductChart() {
         legend: { display: false },
         tooltip: {
           callbacks: {
+            title: function(items) {
+              // Show full product name (un-wrapped) in tooltip
+              const idx = items[0].dataIndex;
+              return sorted[idx].name || 'Unknown';
+            },
             label: function(ctx) {
               const val = ctx.parsed.x;
               const pct = totalRev ? (val / totalRev * 100).toFixed(1) : 0;
@@ -856,8 +880,9 @@ function renderTop5ProductChart() {
           grid: { color: 'rgba(0,0,0,0.05)' }
         },
         y: {
-          ticks: { font: { size: 11 } },
-          grid: { display: false }
+          ticks: { font: { size: 11 }, autoSkip: false },
+          grid: { display: false },
+          afterFit: function(axis) { axis.width = 260; }
         }
       }
     }
