@@ -963,28 +963,6 @@ async def api_categories(request: Request, hashed_slug: str):
 
 
 # ============================================================
-# DEBUG: List all manufacturer names in BigQuery (TEMPORARY)
-# ============================================================
-@app.get("/api/debug/manufacturers")
-async def debug_manufacturers():
-    """Temporary endpoint to check all manufacturer names in BigQuery."""
-    sql = f"""
-    SELECT DISTINCT oi.product_manufacturer_name AS mfg,
-      COUNT(DISTINCT oi.product_vertical) AS num_categories,
-      ARRAY_AGG(DISTINCT oi.product_vertical IGNORE NULLS) AS categories,
-      COUNT(*) AS total_items
-    FROM `{PROJECT_DATASET}.order_items` oi
-    WHERE oi.product_manufacturer_name LIKE '%anity%'
-       OR oi.product_manufacturer_name LIKE '%vaay%'
-       OR oi.product_manufacturer_name LIKE '%avaay%'
-    GROUP BY 1
-    ORDER BY total_items DESC
-    """
-    rows = run_query(sql)
-    return {"manufacturers": rows}
-
-
-# ============================================================
 # RECONCILIATION DASHBOARD (HTV Admin only)
 # ============================================================
 HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "HtvRecon2026!")
