@@ -476,6 +476,14 @@ let currentProducts = [];
 let currentFees = [];
 let charts = {};
 
+// Product table state
+let prodSortCol = 6, prodSortAsc = false;
+const PROD_FIELDS = ['name','brand','category','origin','num_rx','volume','revenue','net_revenue','epg','gpx'];
+const colFilters = { prod: {} };
+let activeFilterTable = null;
+let activeFilterCol = null;
+let productTotalCount = 0;
+
 // Initialize
 document.addEventListener('DOMContentLoaded', initBrands);
 
@@ -502,7 +510,9 @@ async function loadAll() {
   const e = document.getElementById('endDate').value;
   const cs = document.getElementById('compareStart').value;
   const ce = document.getElementById('compareEnd').value;
-  const url = `/api/recon/${selectedBrandSlug}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}`;
+  const cat = document.getElementById('globalCategory')?.value || '';
+  let url = `/api/recon/${selectedBrandSlug}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}`;
+  if (cat) url += `&category=${encodeURIComponent(cat)}`;
 
   try {
     const resp = await fetch(url);
@@ -861,14 +871,74 @@ function renderProducts() {
     document.getElementById('prodTableEl').style.display = 'none';
     return;
   }
+  document.getElementById('prodTableEl').style.display = '';
 
-  const displayProducts = currentProducts.slice(0, 15);
-  let html = '';
-  displayProducts.forEach(prod => {
-    html += `<tr>
-      <td>${prod.name || '—'}</td>
+  // Capture unfiltered total on initial load (when no dropdown filters are active)
+  const region   = document.getElementById('filterRegion')?.value || '';
+  const brandF   = document.getElementById('filterBrand')?.value || '';
+  const catF     = document.getElementById('filterCategory')?.value || '';
+  const originF  = document.getElementById('filterOrigin')?.value || '';
+  if (!region && !brandF && !catF && !originF) productTotalCount = currentProducts.length;
+
+  // Populate filter dropdowns from available data
+  const brands = [...new Set(currentProducts.map(p=>p.brand).filter(Boolean))].sort();
+  const categories = [...new Set(currentProducts.map(p=>p.category).filter(Boolean))].sort();
+  const origins = [...new Set(currentProducts.map(p=>p.origin).filter(Boolean))].sort();
+  populateSelect('filterBrand', brands, 'All Product Lines');
+  populateSelect('filterCategory', categories, 'All Categories');
+  populateSelect('filterOrigin', origins, 'All Origins');
+
+  // Populate region filter from patient data if available
+  const regions = allData.patient_region || [];
+  if (regions.length) {
+    populateSelect('filterRegion', regions.map(r=>r.region).filter(Boolean).sort(), 'All Regions');
+  }
+
+  renderProductTable();
+}
+
+function renderProductTable() {
+  const brand    = document.getElementById('filterBrand')?.value || '';
+  const category = document.getElementById('filterCategory')?.value || '';
+  const origin   = document.getElementById('filterOrigin')?.value || '';
+
+  let filtered = currentProducts;
+  if (brand)    filtered = filtered.filter(p => p.brand === brand);
+  if (category) filtered = filtered.filter(p => p.category === category);
+  if (origin)   filtered = filtered.filter(p => p.origin === origin);
+
+  // Apply Google Sheets column filters
+  for (const [ci, f] of Object.entries(colFilters.prod)) {
+    const field = PROD_FIELDS[ci];
+    filtered = filtered.filter(r => {
+      const v = String(r[field] ?? '—');
+      if (f.values && !f.values.has(v)) return false;
+      if (f.condType && !matchesCondition(r[field], f.condType, f.condVal)) return false;
+      return true;
+    });
+  }
+
+  // Update product count indicator
+  const grandTotal = productTotalCount || currentProducts.length;
+  const shown = Math.min(filtered.length, 15);
+  const countEl = document.getElementById('prodCount');
+  if (countEl) countEl.textContent = shown === grandTotal ? `Showing all ${grandTotal} products` : `Showing ${shown} of ${filtered.length} products`;
+
+  const sorted = [...filtered].sort((a, b) => {
+    const f = PROD_FIELDS[prodSortCol];
+    let va = a[f] ?? '', vb = b[f] ?? '';
+    if (typeof va === 'string') return prodSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    return prodSortAsc ? va - vb : vb - va;
+  });
+
+  const displayProducts = sorted.slice(0, 15);
+  const tbody = document.getElementById('prodBody');
+  tbody.innerHTML = displayProducts.map(prod => {
+    const catClass = (prod.category||'').toLowerCase().includes('flower') ? 'fl' : ((prod.category||'').toLowerCase().includes('extract') ? 'ex' : 'ot');
+    return `<tr>
+      <td style="font-weight:500;max-width:280px">${prod.name || '—'}</td>
       <td>${prod.brand || '—'}</td>
-      <td>${prod.category || '—'}</td>
+      <td><span class="tag ${catClass}">${prod.category || '—'}</span></td>
       <td>${prod.origin || '—'}</td>
       <td class="r">${formatNum(prod.num_rx)}</td>
       <td class="r">${formatNum(prod.volume, 0)}</td>
@@ -877,13 +947,17 @@ function renderProducts() {
       <td class="r">${formatCurr(prod.epg || 0)}</td>
       <td class="r">${(prod.gpx || 0).toFixed(1)}</td>
     </tr>`;
-  });
-  document.getElementById('prodBody').innerHTML = html;
-  document.getElementById('prodCount').textContent = `Showing ${displayProducts.length} of ${currentProducts.length} products`;
+  }).join('');
 }
 
 function applyProductFilters() {
-  // Implement filtering logic similar to dashboard.html
+  const region   = document.getElementById('filterRegion').value;
+  const brand    = document.getElementById('filterBrand').value;
+  const category = document.getElementById('filterCategory').value;
+  const origin   = document.getElementById('filterOrigin').value;
+  const active = [region, brand, category, origin].filter(Boolean);
+  document.getElementById('filterTag').textContent = active.length > 0 ? `— filtered by: ${active.join(', ')}` : '';
+  renderProductTable();
 }
 
 function clearProductFilters() {
@@ -891,38 +965,201 @@ function clearProductFilters() {
   document.getElementById('filterBrand').value = '';
   document.getElementById('filterCategory').value = '';
   document.getElementById('filterOrigin').value = '';
-  renderProducts();
+  document.getElementById('filterTag').textContent = '';
+  colFilters.prod = {};
+  updateFilterBtnStates();
+  renderProductTable();
+}
+
+function populateSelect(id, options, allLabel) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = `<option value="">${allLabel}</option>` + options.map(o => `<option value="${o}">${o}</option>`).join('');
+  if (cur && options.includes(cur)) sel.value = cur;
 }
 
 function exportProductCSV() {
   if (!currentProducts.length) return;
   const headers = ['Product', 'Brand', 'Category', 'Origin', '# Rx', 'Volume (g)', 'Revenue €', 'Net Rev €', '€/g', 'g/Rx'];
-  const rows = currentProducts.map(p => [
-    p.name, p.brand, p.category, p.origin, p.num_rx, p.volume, p.revenue, p.net_revenue, p.epg, p.gpx
-  ]);
 
-  let csv = headers.join(',') + '\n';
-  rows.forEach(row => csv += row.join(',') + '\n');
+  // Use currently filtered data
+  const brand    = document.getElementById('filterBrand')?.value || '';
+  const category = document.getElementById('filterCategory')?.value || '';
+  const origin   = document.getElementById('filterOrigin')?.value || '';
+  let filtered = currentProducts;
+  if (brand)    filtered = filtered.filter(p => p.brand === brand);
+  if (category) filtered = filtered.filter(p => p.category === category);
+  if (origin)   filtered = filtered.filter(p => p.origin === origin);
+  for (const [ci, f] of Object.entries(colFilters.prod)) {
+    const field = PROD_FIELDS[ci];
+    filtered = filtered.filter(r => {
+      const v = String(r[field] ?? '—');
+      if (f.values && !f.values.has(v)) return false;
+      if (f.condType && !matchesCondition(r[field], f.condType, f.condVal)) return false;
+      return true;
+    });
+  }
 
-  const blob = new Blob([csv], { type: 'text/csv' });
+  const csvRows = [headers.join(',')];
+  filtered.forEach(p => {
+    const row = [p.name, p.brand, p.category, p.origin, p.num_rx, p.volume, p.revenue, p.net_revenue, p.epg, p.gpx]
+      .map(val => { val = String(val ?? '').replace(/"/g, '""'); return `"${val}"`; });
+    csvRows.push(row.join(','));
+  });
+
+  const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'reconciliation-products.csv';
+  a.download = `recon_${selectedBrandSlug}_products_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
+  URL.revokeObjectURL(url);
 }
 
-function openColFilter(e, table, col) {
-  e.stopPropagation();
-  // Column filter implementation
+function openColFilter(event, table, colIndex) {
+  event.stopPropagation();
+  const panel = document.getElementById('colFilterPanel');
+  const btn = event.target;
+  const rect = btn.getBoundingClientRect();
+
+  activeFilterTable = table;
+  activeFilterCol = colIndex;
+
+  // Position panel below the button
+  panel.style.position = 'fixed';
+  panel.style.top = (rect.bottom + 4) + 'px';
+  panel.style.left = Math.min(rect.left, window.innerWidth - 280) + 'px';
+  panel.classList.add('open');
+
+  // Populate unique values
+  const allValues = getColumnValues(table, colIndex);
+  const existing = colFilters[table][colIndex];
+  const checkedValues = existing?.values || new Set(allValues);
+
+  const container = document.getElementById('cfpValues');
+  container.innerHTML = allValues.map(v => {
+    const checked = checkedValues.has(v) ? 'checked' : '';
+    const escaped = v.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return `<label><input type="checkbox" value="${escaped}" data-raw="${escaped}" ${checked}> ${escaped}</label>`;
+  }).join('');
+
+  document.getElementById('cfpSelectAll').checked = checkedValues.size === allValues.length;
+  document.getElementById('cfpSearch').value = '';
+
+  // Restore condition if any
+  document.getElementById('cfpCondType').value = existing?.condType || '';
+  document.getElementById('cfpCondVal').value = existing?.condVal || '';
+
+  // Sort button handlers
+  document.getElementById('cfpSortAsc').onclick = () => { sortColumn(table, colIndex, true); closeColFilter(); };
+  document.getElementById('cfpSortDesc').onclick = () => { sortColumn(table, colIndex, false); closeColFilter(); };
 }
 
-function clearColFilter() {
+function closeColFilter() {
   document.getElementById('colFilterPanel').classList.remove('open');
+  activeFilterTable = null;
+  activeFilterCol = null;
+}
+
+// Close panel when clicking outside
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('colFilterPanel');
+  if (panel.classList.contains('open') && !panel.contains(e.target)) {
+    closeColFilter();
+  }
+});
+
+// Apply filter on Enter key, close on Escape
+document.getElementById('colFilterPanel').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); applyColFilter(); }
+  if (e.key === 'Escape') { e.preventDefault(); closeColFilter(); }
+});
+
+function smartSort(arr) {
+  const nums = arr.filter(v => v !== '—');
+  const allNumeric = nums.length > 0 && nums.every(v => isFinite(parseFloat(v)));
+  if (allNumeric) return arr.sort((a, b) => (a === '—' ? -1 : b === '—' ? 1 : parseFloat(a) - parseFloat(b)));
+  return arr.sort();
+}
+
+function getColumnValues(table, colIndex) {
+  if (table === 'prod') {
+    const field = PROD_FIELDS[colIndex];
+    return smartSort([...new Set(currentProducts.map(r => String(r[field] ?? '—')))]);
+  }
+  return [];
+}
+
+function filterValueCheckboxes() {
+  const q = document.getElementById('cfpSearch').value.toLowerCase();
+  document.querySelectorAll('#cfpValues label').forEach(lbl => {
+    lbl.style.display = lbl.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function toggleAllValues() {
+  const checked = document.getElementById('cfpSelectAll').checked;
+  document.querySelectorAll('#cfpValues input[type=checkbox]').forEach(cb => { if (cb.closest('label').style.display !== 'none') cb.checked = checked; });
 }
 
 function applyColFilter() {
-  clearColFilter();
+  if (activeFilterTable == null || activeFilterCol == null) { closeColFilter(); return; }
+  const values = new Set();
+  const decode = s => s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&amp;/g,'&');
+  document.querySelectorAll('#cfpValues input[type=checkbox]:checked').forEach(cb => values.add(decode(cb.value)));
+  const condType = document.getElementById('cfpCondType').value;
+  const condVal = document.getElementById('cfpCondVal').value;
+  const allValues = getColumnValues(activeFilterTable, activeFilterCol);
+
+  if (values.size === allValues.length && !condType) {
+    delete colFilters[activeFilterTable][activeFilterCol];
+  } else {
+    colFilters[activeFilterTable][activeFilterCol] = { values, condType, condVal };
+  }
+
+  updateFilterBtnStates();
+  if (activeFilterTable === 'prod') renderProductTable();
+  closeColFilter();
+}
+
+function clearColFilter() {
+  if (activeFilterTable && activeFilterCol != null) {
+    delete colFilters[activeFilterTable][activeFilterCol];
+    updateFilterBtnStates();
+    if (activeFilterTable === 'prod') renderProductTable();
+  }
+  closeColFilter();
+}
+
+function updateFilterBtnStates() {
+  document.querySelectorAll('#prodTableEl .col-filter-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', !!colFilters.prod[i]);
+    btn.textContent = colFilters.prod[i] ? '▼●' : '▼';
+  });
+}
+
+function matchesCondition(val, condType, condVal) {
+  if (!condType) return true;
+  const s = String(val).toLowerCase();
+  const c = String(condVal).toLowerCase();
+  const n = parseFloat(val);
+  const cn = parseFloat(condVal);
+  switch(condType) {
+    case 'contains': return s.includes(c);
+    case 'not_contains': return !s.includes(c);
+    case 'eq': return s === c || (isFinite(n) && isFinite(cn) && n === cn);
+    case 'neq': return s !== c && !(isFinite(n) && isFinite(cn) && n === cn);
+    case 'gt': return isFinite(n) && isFinite(cn) && n > cn;
+    case 'gte': return isFinite(n) && isFinite(cn) && n >= cn;
+    case 'lt': return isFinite(n) && isFinite(cn) && n < cn;
+    case 'lte': return isFinite(n) && isFinite(cn) && n <= cn;
+  }
+  return true;
+}
+
+function sortColumn(table, colIndex, asc) {
+  if (table === 'prod') { prodSortCol = colIndex; prodSortAsc = asc; renderProductTable(); }
 }
 
 // Date picker functions
@@ -937,19 +1174,79 @@ function cancelDatePanel() {
 function applyDatePanel() {
   const from = document.getElementById('dpFrom').value;
   const to = document.getElementById('dpTo').value;
-  if (from && to) {
-    document.getElementById('startDate').value = from;
-    document.getElementById('endDate').value = to;
-    document.getElementById('dateTriggerText').textContent = formatDateRange(from, to);
-    document.getElementById('datePanel').classList.remove('open');
-    loadAll();
+  if (!from || !to) return;
+  document.getElementById('startDate').value = from;
+  document.getElementById('endDate').value = to;
+  // Calculate comparison dates (same length period before the selected range)
+  const cmpOn = document.getElementById('compareToggle')?.classList.contains('on');
+  if (cmpOn) {
+    const cmp = getCompareDates(from, to);
+    document.getElementById('compareStart').value = cmp.start;
+    document.getElementById('compareEnd').value = cmp.end;
+  } else {
+    document.getElementById('compareStart').value = '';
+    document.getElementById('compareEnd').value = '';
   }
+  document.getElementById('dateTriggerText').textContent = formatDateRange(from, to);
+  document.getElementById('datePanel').classList.remove('open');
+  loadAll();
+}
+
+function getCompareDates(startStr, endStr) {
+  const start = new Date(startStr);
+  const end = new Date(endStr);
+  const diffMs = end - start;
+  const diffDays = Math.round(diffMs / (1000*60*60*24));
+  const cEnd = new Date(start); cEnd.setDate(cEnd.getDate() - 1);
+  const cStart = new Date(cEnd); cStart.setDate(cStart.getDate() - diffDays);
+  return { start: cStart.toISOString().slice(0,10), end: cEnd.toISOString().slice(0,10) };
 }
 
 function selectPreset(btn) {
   document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  // Implement preset logic
+  const preset = btn.dataset.preset;
+  const today = new Date();
+  let from, to;
+  to = today.toISOString().slice(0,10);
+
+  switch(preset) {
+    case 'today':
+      from = to; break;
+    case 'yesterday': {
+      const y = new Date(today); y.setDate(y.getDate()-1);
+      from = to = y.toISOString().slice(0,10); break;
+    }
+    case 'last7': {
+      const d = new Date(today); d.setDate(d.getDate()-6);
+      from = d.toISOString().slice(0,10); break;
+    }
+    case 'last30': {
+      const d = new Date(today); d.setDate(d.getDate()-29);
+      from = d.toISOString().slice(0,10); break;
+    }
+    case 'last90': {
+      const d = new Date(today); d.setDate(d.getDate()-89);
+      from = d.toISOString().slice(0,10); break;
+    }
+    case 'mtd': {
+      from = today.toISOString().slice(0,8) + '01'; break;
+    }
+    case 'ytd': {
+      from = today.getFullYear() + '-01-01'; break;
+    }
+    case 'last12m': {
+      const d = new Date(today); d.setMonth(d.getMonth()-12); d.setDate(1);
+      from = d.toISOString().slice(0,10); break;
+    }
+    case 'custom':
+      return; // User will set custom dates manually
+    default:
+      from = today.getFullYear() + '-01-01';
+  }
+
+  document.getElementById('dpFrom').value = from;
+  document.getElementById('dpTo').value = to;
 }
 
 function setCompareMode(btn) {
