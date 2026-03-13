@@ -534,6 +534,18 @@ async function initBrands() {
     opt.textContent = brand.name;
     sel.appendChild(opt);
   });
+
+  // Compute default comparison dates (prev period for YTD) before first load
+  const todayStr = isoDate(new Date());
+  document.getElementById('startDate').value = todayStr.slice(0,4) + '-01-01';
+  document.getElementById('endDate').value = todayStr;
+  document.getElementById('dpFrom').value = todayStr.slice(0,4) + '-01-01';
+  document.getElementById('dpTo').value = todayStr;
+  const cmp = getCompareDates(document.getElementById('startDate').value, todayStr);
+  document.getElementById('compareStart').value = cmp.start;
+  document.getElementById('compareEnd').value = cmp.end;
+  updateTriggerText(document.getElementById('startDate').value, todayStr);
+
   // Load categories and data for "All Brands" on page load
   await loadCategories();
   await loadAll();

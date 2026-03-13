@@ -617,6 +617,12 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "avg_order_value": r.get("avg_order_value"),
             "repeat_purchase_rate": r.get("repeat_purchase_rate"),
         },
+        "previous": {
+            "prescriptions": r.get("prev_rx"),
+            "revenue_eur": r.get("prev_rev"),
+            "sales_volume_g": r.get("prev_vol"),
+            "net_revenue_eur": r.get("prev_net"),
+        },
         "growth": {
             "prescriptions": safe_growth(r.get("prescriptions"), r.get("prev_rx")),
             "revenue": safe_growth(r.get("revenue_eur"), r.get("prev_rev")),
@@ -1109,12 +1115,14 @@ async def api_recon_combined(
         "market_share": market_share,
     }]
 
-    # Build compare KPI from growth percentages (reverse-compute previous values)
-    prev_rx = (cur.get("prescriptions") or 0) / (1 + grw.get("prescriptions", 0)) if grw.get("prescriptions") else None
-    prev_rev = (cur.get("revenue_eur") or 0) / (1 + grw.get("revenue", 0)) if grw.get("revenue") else None
-    prev_vol = (cur.get("sales_volume_g") or 0) / (1 + grw.get("volume", 0)) if grw.get("volume") else None
-    prev_net = (cur.get("net_revenue_eur") or 0) / (1 + grw.get("net_revenue", 0)) if grw.get("net_revenue") else None
-    kpi_compare = [{"num_rx": prev_rx, "revenue": prev_rev, "volume": prev_vol, "net_revenue": prev_net}]
+    # Build compare KPI from raw previous-period values returned by _get_summary
+    prev_data = summary.get("previous", {})
+    kpi_compare = [{
+        "num_rx": prev_data.get("prescriptions"),
+        "revenue": prev_data.get("revenue_eur"),
+        "volume": prev_data.get("sales_volume_g"),
+        "net_revenue": prev_data.get("net_revenue_eur"),
+    }]
 
     # Map trends → trend + growth + fee_detail
     trend_data = trends.get("data", [])
