@@ -77,22 +77,11 @@ BRAND_HASHES = {
 HASH_TO_SLUG = {f"{h}-{slug}": slug for slug, h in BRAND_HASHES.items()}
 
 def resolve_slug(hashed_slug: str) -> str:
-    """Resolve a hashed slug like 'c7a3f1-cannamedical' to 'cannamedical'.
-    Also accepts old-style plain slugs (e.g. 'four20') for backward compatibility."""
+    """Resolve a hashed slug like 'c7a3f1-cannamedical' to 'cannamedical'."""
     slug = HASH_TO_SLUG.get(hashed_slug)
     if not slug:
-        # Fallback: accept old-style plain slugs for API compatibility
-        if hashed_slug in BRAND_HASHES:
-            return hashed_slug
         raise HTTPException(status_code=404, detail="Brand not found")
     return slug
-
-
-def get_hashed_slug(plain_slug: str) -> str | None:
-    """If plain_slug is an old-style unhashed slug, return its hashed version."""
-    if plain_slug in BRAND_HASHES:
-        return f"{BRAND_HASHES[plain_slug]}-{plain_slug}"
-    return None
 
 
 # ============================================================
@@ -408,11 +397,6 @@ def date_params(start_date: str, end_date: str, category: str = ""):
 @app.get("/brand/{hashed_slug}", response_class=HTMLResponse)
 async def brand_page(request: Request, hashed_slug: str):
     """Show dashboard if logged in, otherwise redirect to login."""
-    # Support old-style URLs: /brand/four20 → /brand/d9e2b4-four20
-    redirect_slug = get_hashed_slug(hashed_slug)
-    if redirect_slug:
-        return RedirectResponse(url=f"/brand/{redirect_slug}", status_code=301)
-
     slug = resolve_slug(hashed_slug)
 
     # Check session
@@ -963,6 +947,39 @@ async def api_categories(request: Request, hashed_slug: str):
 
 
 # ============================================================
+# MARKET SHARE HELPER (used by reconciliation dashboard)
+# ============================================================
+async def _get_platform_total_rx(start_date: str = "", end_date: str = "", category: str = ""):
+    """Get total prescriptions across ALL manufacturers on the platform."""
+    s = start_date or "2020-01-01"
+    e = end_date or datetime.now().strftime("%Y-%m-%d")
+    ck = cache_key("platform_total", s=s, e=e, cat=category)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+
+    cat_filter = "AND oi.product_vertical = @category" if category else ""
+    sql = f"""
+    SELECT COUNT(DISTINCT o.order_id) AS total_rx
+    FROM `{PROJECT_DATASET}.order_items` oi
+    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    WHERE DATE(o.created_at) >= DATE(@start) AND DATE(o.created_at) <= DATE(@end)
+      {NET_ORDER_FILTER} {cat_filter}
+    """
+    params = [
+        bigquery.ScalarQueryParameter("start", "DATE", s),
+        bigquery.ScalarQueryParameter("end", "DATE", e),
+    ]
+    if category:
+        params.append(bigquery.ScalarQueryParameter("category", "STRING", category))
+
+    rows = run_query(sql, params)
+    result = rows[0].get("total_rx", 0) if rows else 0
+    cache_set(ck, result)
+    return result
+
+
+# ============================================================
 # RECONCILIATION DASHBOARD (HTV Admin only)
 # ============================================================
 HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "HtvRecon2026!")
@@ -1012,14 +1029,15 @@ async def api_recon_combined(
         raise HTTPException(status_code=404, detail="Brand not found")
     mfg_name = MANUFACTURER_BQ_NAMES[slug]
 
-    # Run all queries in parallel
-    summary, trends, products, breakdowns, patients, pricing = await asyncio.gather(
+    # Run all queries in parallel (including platform total for market share)
+    summary, trends, products, breakdowns, patients, pricing, platform_rx = await asyncio.gather(
         _get_summary(mfg_name, slug, start, end, category, cstart, cend),
         _get_trends(mfg_name, slug, start, end, category),
         _get_products(mfg_name, slug, start, end),
         _get_breakdowns(mfg_name, slug, start, end, category),
         _get_patients(mfg_name, slug, start, end, category),
         _get_pricing(mfg_name, slug, start, end, category),
+        _get_platform_total_rx(start, end, category),
     )
 
     # Map summary → kpi / kpi_compare
@@ -1027,6 +1045,10 @@ async def api_recon_combined(
     grw = summary.get("growth", {})
     fee_info = MANUFACTURER_FEES.get(slug, {})
     fee_amt = summary.get("fee", {}).get("amount", 0)
+
+    # Market share: brand Rx / platform Rx
+    brand_rx = cur.get("prescriptions") or 0
+    market_share = (brand_rx / platform_rx * 100) if platform_rx else None
 
     kpi = [{
         "num_rx": cur.get("prescriptions"),
@@ -1039,6 +1061,7 @@ async def api_recon_combined(
         "aov": cur.get("avg_order_value"),
         "num_patients": cur.get("total_patients"),
         "repeat_rate": cur.get("repeat_purchase_rate"),
+        "market_share": market_share,
     }]
 
     # Build compare KPI from growth percentages (reverse-compute previous values)

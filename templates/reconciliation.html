@@ -286,11 +286,12 @@
 
 <!-- SECTION 1: KPIs -->
 <div class="section-title"><span class="num">1</span> Key Metrics</div>
-<div class="grid grid-4" id="kpiGrid">
+<div class="grid grid-5" id="kpiGrid">
   <div class="card kpi-card accent-blue"><div class="label"># Prescriptions</div><div class="value" id="k-rx">—</div><div class="change" id="k-rx-chg"></div><div class="kpi-desc">Net orders (excl. voided)</div></div>
   <div class="card kpi-card accent-teal"><div class="label">Revenue (€)</div><div class="value" id="k-rev">—</div><div class="change" id="k-rev-chg"></div><div class="kpi-desc">Total gross revenue</div></div>
   <div class="card kpi-card accent-green"><div class="label">Sales Volume (g)</div><div class="value" id="k-vol">—</div><div class="change" id="k-vol-chg"></div><div class="kpi-desc">Net grams sold</div></div>
   <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">Excl. fees, taxes, refunds</div></div>
+  <div class="card kpi-card accent-orange"><div class="label">Market Share (Rx)</div><div class="value" id="k-mshare">—</div><div class="kpi-desc">% of total platform prescriptions</div></div>
 </div>
 <div class="grid grid-6" style="margin-top:16px;">
   <div class="card kpi-card accent-blue"><div class="label">Total Fee</div><div class="value" id="k-fee">—</div><div class="kpi-desc">Total amount charged</div></div>
@@ -554,6 +555,14 @@ function renderKPIs() {
   document.getElementById('k-aov').textContent = formatCurr(kpi.aov || 0);
   document.getElementById('k-pat').textContent = formatNum(kpi.num_patients);
   document.getElementById('k-rpr').textContent = formatPct(kpi.repeat_rate);
+
+  // Market share
+  const mshareEl = document.getElementById('k-mshare');
+  if (kpi.market_share != null) {
+    mshareEl.textContent = kpi.market_share.toFixed(1) + '%';
+  } else {
+    mshareEl.textContent = '—';
+  }
 }
 
 function renderDealTerms() {

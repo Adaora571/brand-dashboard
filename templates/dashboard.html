@@ -317,11 +317,12 @@
   <div class="card kpi-card accent-green"><div class="label">Sales Volume (g)</div><div class="value" id="k-vol">—</div><div class="change" id="k-vol-chg"></div><div class="kpi-desc">Net grams (excl. voided &amp; returned)</div></div>
   <div class="card kpi-card accent-purple"><div class="label">Net Revenue</div><div class="value" id="k-net">—</div><div class="change" id="k-net-chg"></div><div class="kpi-desc">Excl. discounts, taxes &amp; refunds</div></div>
 </div>
-<div class="grid grid-4" style="margin:12px auto 0;">
+<div class="grid grid-5" style="margin:12px auto 0;">
   <div class="card kpi-card kpi-secondary accent-teal"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="kpi-desc">Net Revenue / Volume</div></div>
   <div class="card kpi-card kpi-secondary accent-green"><div class="label">New Patients</div><div class="value" id="k-newpat">—</div><div class="kpi-desc">First-time buyers</div></div>
   <div class="card kpi-card kpi-secondary accent-purple"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
   <div class="card kpi-card kpi-secondary accent-orange"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="kpi-desc">Patients with 2+ lifetime orders</div></div>
+  <div class="card kpi-card kpi-secondary accent-red"><div class="label">MoM Rx Growth</div><div class="value" id="k-mom">—</div><div class="kpi-desc" id="k-mom-desc">Latest month vs prior month</div></div>
 </div>
 
 <!-- SECTION 2: TRENDS -->
@@ -872,6 +873,31 @@ function renderTrends(data) {
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
   createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'Revenue %',data:gR,borderColor:COLORS.green,borderWidth:2,backgroundColor:'rgba(22,163,74,0.1)',fill:true,tension:0.3,pointRadius:3},{label:'Volume %',data:gV,borderColor:'#13375E',borderWidth:2,tension:0.3,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
+
+  // MoM Rx Growth KPI — compute from the last 2 months with data
+  const momEl = document.getElementById('k-mom');
+  const momDesc = document.getElementById('k-mom-desc');
+  if (rows.length >= 2) {
+    const curr = rows[rows.length - 1];
+    const prev = rows[rows.length - 2];
+    const currRx = curr.prescriptions || 0;
+    const prevRx = prev.prescriptions || 0;
+    if (prevRx > 0) {
+      const momPct = ((currRx - prevRx) / prevRx * 100);
+      const sign = momPct >= 0 ? '+' : '';
+      momEl.textContent = sign + momPct.toFixed(1) + '%';
+      momEl.style.color = momPct >= 0 ? 'var(--green)' : 'var(--red)';
+      // Format month names for description
+      const fmtMo = p => { const [y,m] = p.split('-'); const mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m)-1]; return mo + ' ' + y; };
+      momDesc.textContent = fmtMo(curr.period) + ' vs ' + fmtMo(prev.period);
+    } else {
+      momEl.textContent = '—';
+      momDesc.textContent = 'No prior month data';
+    }
+  } else {
+    momEl.textContent = '—';
+    momDesc.textContent = 'Need 2+ months of data';
+  }
 }
 
 function renderProducts(data) {
