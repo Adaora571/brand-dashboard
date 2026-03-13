@@ -309,6 +309,14 @@ def verify_session(request: Request, slug: str) -> str:
     return MANUFACTURER_BQ_NAMES[slug]
 
 
+def get_display_name(slug: str) -> str:
+    """Return user-facing brand name (from BRAND_CONFIG), falling back to BQ name."""
+    cfg = BRAND_CONFIG.get(slug)
+    if cfg and cfg.get("name"):
+        return cfg["name"]
+    return MANUFACTURER_BQ_NAMES.get(slug, slug)
+
+
 def calc_fee(fee_info: dict, volume_g, revenue, months: int = 1) -> float:
     """Calculate fee based on deal terms."""
     t = fee_info["type"]
@@ -397,7 +405,7 @@ async def brand_page(request: Request, hashed_slug: str):
             "request": request,
             "slug": slug,
             "hashed_slug": hashed_slug,
-            "manufacturer_name": MANUFACTURER_BQ_NAMES[slug],
+            "manufacturer_name": get_display_name(slug),
             "error": "",
         })
 
@@ -407,7 +415,7 @@ async def brand_page(request: Request, hashed_slug: str):
         "request": request,
         "slug": slug,
         "hashed_slug": hashed_slug,
-        "manufacturer_name": MANUFACTURER_BQ_NAMES[slug],
+        "manufacturer_name": get_display_name(slug),
         "fee": fee,
         "brand": brand,
     })
@@ -417,14 +425,14 @@ async def brand_page(request: Request, hashed_slug: str):
 async def brand_login(request: Request, hashed_slug: str, password: str = Form(...)):
     """Handle login form submission."""
     slug = resolve_slug(hashed_slug)
-    mfg_name = MANUFACTURER_BQ_NAMES[slug]
+    display_name = get_display_name(slug)
     client_ip = request.client.host if request.client else "unknown"
 
     # Rate limiting
     if not check_rate_limit(client_ip):
         return templates.TemplateResponse("login.html", {
             "request": request, "slug": slug, "hashed_slug": hashed_slug,
-            "manufacturer_name": mfg_name,
+            "manufacturer_name": display_name,
             "error": "Too many login attempts. Please try again in 15 minutes.",
         }, status_code=429)
 
@@ -432,7 +440,7 @@ async def brand_login(request: Request, hashed_slug: str, password: str = Form(.
     if is_password_expired(slug):
         return templates.TemplateResponse("login.html", {
             "request": request, "slug": slug, "hashed_slug": hashed_slug,
-            "manufacturer_name": mfg_name,
+            "manufacturer_name": display_name,
             "error": "Your password has expired. Please contact HTV for a new password.",
         }, status_code=403)
 
@@ -441,7 +449,7 @@ async def brand_login(request: Request, hashed_slug: str, password: str = Form(.
         record_failed_attempt(client_ip)
         return templates.TemplateResponse("login.html", {
             "request": request, "slug": slug, "hashed_slug": hashed_slug,
-            "manufacturer_name": mfg_name,
+            "manufacturer_name": display_name,
             "error": "Invalid password. Please try again.",
         }, status_code=401)
 
