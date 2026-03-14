@@ -745,15 +745,18 @@ function renderCharts() {
   if (allData.ppo_dist) renderPPOChart();
 }
 
+function fmtDate(d) { if (!d) return ''; const p = d.split('-'); const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[parseInt(p[1])-1] + " '" + p[0].slice(2); }
+
 function renderTrendChart() {
   const trend = allData.trend || [];
+  const labels = trend.map(x => fmtDate(x.period));
   const ctx = document.getElementById('chartTrend').getContext('2d');
   if (charts.trend) charts.trend.destroy();
 
   charts.trend = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: trend.map(x => x.period),
+      labels,
       datasets: [
         {
           label: 'Gross Revenue (€)',
@@ -762,7 +765,7 @@ function renderTrendChart() {
           yAxisID: 'y',
         },
         {
-          label: 'Volume (g)',
+          label: 'Volume',
           data: trend.map(x => x.volume),
           borderColor: '#13375E',
           borderWidth: 2,
@@ -777,9 +780,10 @@ function renderTrendChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       scales: {
-        y: { beginAtZero: true, ticks: { callback: v => '€' + v.toLocaleString() } },
-        y1: { position: 'right', beginAtZero: true, ticks: { callback: v => v.toLocaleString() + 'g' } }
+        y: { beginAtZero: true, position: 'left', ticks: { callback: v => '€' + (v/1000).toFixed(0) + 'k' } },
+        y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, ticks: { callback: v => (v/1000).toFixed(0) + 'k' } }
       }
     }
   });
@@ -793,7 +797,7 @@ function renderGrowthChart() {
   charts.growth = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: growth.map(x => x.period),
+      labels: growth.map(x => fmtDate(x.period)),
       datasets: [{
         label: 'MoM Growth %',
         data: growth.map(x => x.growth_pct),
