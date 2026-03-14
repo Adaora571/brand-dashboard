@@ -422,7 +422,7 @@
 <div class="grid grid-3">
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box"><canvas id="chartPatients"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Age Segments</div><div class="chart-box"><canvas id="chartAge"></canvas></div></div>
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Region</div><div class="chart-box"><canvas id="chartRegion"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Region <span style="font-weight:400;color:var(--muted);font-size:11px;">(Unique Patients)</span></div><div class="chart-box" style="height:420px;"><canvas id="chartRegion"></canvas></div></div>
 </div>
 
 </div><!-- /container -->
@@ -1060,7 +1060,9 @@ function renderRegionChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      scales: { y: { beginAtZero: true } }
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: { y: { ticks: { autoSkip: false, font: { size: 11 } } } }
     }
   });
 }
