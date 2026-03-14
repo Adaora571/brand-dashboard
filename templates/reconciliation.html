@@ -937,6 +937,12 @@ function renderCategoryChart() {
   });
 }
 
+function fmtAxisVolume(v) {
+  if (v >= 1000000) return (v/1000000).toFixed(v % 1000000 === 0 ? 0 : 1) + 'M';
+  if (v >= 1000) return (v/1000).toFixed(0) + 'k';
+  return v;
+}
+
 function renderPriceTierChart() {
   const tier = allData.price_tier || [];
   const ctx = document.getElementById('chartPrice').getContext('2d');
@@ -960,7 +966,8 @@ function renderPriceTierChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      scales: { y: { beginAtZero: true, ticks: { callback: v => '€' + (v/1000).toFixed(0) + 'k' } } }
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { callback: v => '€' + fmtAxisVolume(v) } } }
     }
   });
 }
