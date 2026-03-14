@@ -870,7 +870,7 @@ function renderTrends(data) {
   const u = getUnitLabel();
   const specific = hasSpecificCategory();
   const isGenericUnit = (u === 'units');
-  const volLabel = (specific && !isGenericUnit) ? 'Volume ('+u+')' : 'Volume';
+  const volLabel = (specific && !isGenericUnit) ? 'Volume ('+u+')' : 'Volume (Units)';
   const yTitle = (specific && !isGenericUnit) ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
   createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:'Gross Revenue (€)',data:rows.map(r=>r.revenue_eur),backgroundColor:rows.map((_,i)=>PALETTE[i%PALETTE.length]),yAxisID:'y'},{label:volLabel,data:rows.map(r=>r.sales_volume_g),type:'line',borderColor:'#13375E',borderWidth:2,yAxisID:'y1',fill:false,tension:0.3,pointBackgroundColor:'#13375E'}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'+((specific&&!isGenericUnit)?u:'')}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
