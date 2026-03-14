@@ -954,7 +954,7 @@ function renderBreakdowns(data) {
   const ptSpecific=hasSpecificCategory();
   const ptSuffix=(ptSpecific && ptU!=='units') ? '/'+ptU : '';
   const ptLabels=pt.map(p=>p.price_tier.replace(/\/g\b/g, ptSuffix));
-  createOrUpdate('chartPrice',{type:'bar',data:{labels:ptLabels,datasets:[{label:'Net Rev €',data:pt.map(p=>p.net_revenue_eur),backgroundColor:[COLORS.green,COLORS.blue,COLORS.teal,COLORS.purple,COLORS.orange]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  createOrUpdate('chartPrice',{type:'bar',data:{labels:ptLabels,datasets:[{label:'Net Rev €',data:pt.map(p=>p.net_revenue_eur),backgroundColor:[COLORS.green,COLORS.blue,COLORS.teal,COLORS.purple,COLORS.orange]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{min:0,beginAtZero:true,ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
 }
 
 function renderPatients(data) {
