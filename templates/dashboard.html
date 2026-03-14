@@ -964,7 +964,7 @@ function renderPatients(data) {
   const rd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='returning')||{}).patient_count||0);
   const newPatTotal=nd.reduce((a,b)=>a+b,0);
   document.getElementById('k-newpat').textContent=fmt(newPatTotal);
-  createOrUpdate('chartPatients',{type:'bar',data:{labels:periods.map(fmtDate),datasets:[{label:'New',data:nd,backgroundColor:'#1a0a2ecc',borderColor:'#1a0a2e',borderWidth:1,stack:'a'},{label:'Returning',data:rd,backgroundColor:'#7c5cbfaa',borderColor:'#7c5cbf',borderWidth:1,stack:'a'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true}}}});
+  createOrUpdate('chartPatients',{type:'bar',data:{labels:periods.map(fmtDate),datasets:[{label:'New',data:nd,backgroundColor:'#1a0a2e',borderColor:'#1a0a2e',borderWidth:1,stack:'a'},{label:'Returning',data:rd,backgroundColor:'#d4a017',borderColor:'#b8860b',borderWidth:1,stack:'a'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true}}}});
   const age=data.age_segments||[];
   createOrUpdate('chartAge',{type:'bar',data:{labels:age.map(a=>a.age_segment),datasets:[{label:'Patients',data:age.map(a=>a.patient_count),backgroundColor:PALETTE.slice(0,age.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
   const reg=(data.regions||[]).filter(r=>r.region && r.region.trim());
