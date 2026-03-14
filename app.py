@@ -200,7 +200,7 @@ MANUFACTURER_PASSWORDS = {
     "enua":          os.getenv("TOKEN_ENUA",            "Kf6#pV2xJ8sT"),
     "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "Bq9$wM4rH7nC"),
     "iuvo":          os.getenv("TOKEN_IUVO",            "Zj5@tN8kD3vR"),
-    "sanitygroup":         os.getenv("TOKEN_AVAAY",           "Lm7#gX2cF9pW"),
+    "sanitygroup":         os.getenv("TOKEN_SANITYGROUP",     "Lm7#gX2cF9pW"),
 }
 
 # Password set dates — used for 90-day expiry. Default = today (first deploy).
@@ -1030,7 +1030,7 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
 # ============================================================
 # RECONCILIATION DASHBOARD (HTV Admin only)
 # ============================================================
-HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "HtvRecon2026!")
+HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "Rv3#nL8kT5wQ")
 
 
 @app.get("/reconciliation", response_class=HTMLResponse)
