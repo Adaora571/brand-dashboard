@@ -7,7 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
-    --primary: #1F0036; --accent: #0589D3; --navy: #13375E;
+    --primary: #1a0a2e; --accent: #0589D3; --navy: #2d1650;
     --green: #16a34a; --orange: #ea580c; --purple: #7c3aed; --red: #dc2626;
     --bg: #f8fafc; --card: #fff; --border: #e2e8f0; --text: #1e293b; --muted: #64748b;
   }
@@ -22,9 +22,7 @@
     content:''; position:absolute; top:0; left:0; right:0; height:1px;
     background:linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0) 100%);
   }
-  .header h1 { font-size:22px; font-weight:700; display:flex; align-items:center; gap:12px; }
-  .header h1 img { height:32px; }
-  .header .subtitle { color:rgba(255,255,255,0.65); font-size:12px; margin-top:2px; }
+  .header .subtitle { color:rgba(255,255,255,0.7); font-size:13px; margin-top:4px; font-weight:500; letter-spacing:0.5px; }
   .header-left { display:flex; flex-direction:column; }
   .logout-btn { color:rgba(255,255,255,0.55); padding:6px 12px; border-radius:8px; transition:all 0.2s; text-decoration:none; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; }
   .logout-btn:hover { color:#fff; background:rgba(255,255,255,0.12); }
@@ -210,8 +208,8 @@
 <!-- HEADER -->
 <div class="header">
   <div class="header-left">
-    <h1><img src="/static/logos/nordleaf.svg" alt="NordLeaf"> Reconciliation Dashboard</h1>
-    <div class="subtitle">Internal · Fee Reconciliation &amp; Analytics</div>
+    <div><img src="/static/logos/nordleaf.svg" alt="NordLeaf" style="height:28px;"></div>
+    <div class="subtitle">Reconciliation Dashboard</div>
   </div>
   <a href="/reconciliation/logout" class="logout-btn" title="Sign out">
     Sign out
