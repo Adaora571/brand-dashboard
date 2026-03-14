@@ -388,7 +388,7 @@
         <th>Category <button class="col-filter-btn" onclick="openColFilter(event,'prod',2)">▼</button></th>
         <th>Origin <button class="col-filter-btn" onclick="openColFilter(event,'prod',3)">▼</button></th>
         <th class="r"># Rx <button class="col-filter-btn" onclick="openColFilter(event,'prod',4)">▼</button></th>
-        <th class="r" id="thVolume">Vol. (g) <button class="col-filter-btn" onclick="openColFilter(event,'prod',5)">▼</button></th>
+        <th class="r" id="thVolume">Vol (g) <button class="col-filter-btn" onclick="openColFilter(event,'prod',5)">▼</button></th>
         <th class="r">Gross Rev € <button class="col-filter-btn" onclick="openColFilter(event,'prod',6)">▼</button></th>
         <th class="r">Net Rev € <button class="col-filter-btn" onclick="openColFilter(event,'prod',7)">▼</button></th>
         <th class="r" id="thEpUnit">€/g <button class="col-filter-btn" onclick="openColFilter(event,'prod',8)">▼</button></th>
@@ -1063,11 +1063,11 @@ function renderProducts() {
   const isGenericUnit = (u === 'units');
   if (specific && !isGenericUnit) {
     const uCap = u.charAt(0).toUpperCase() + u.slice(1);
-    document.getElementById('thVolume').firstChild.textContent = 'Vol. (' + uCap + ') ';
+    document.getElementById('thVolume').firstChild.textContent = 'Vol (' + uCap + ') ';
     document.getElementById('thEpUnit').firstChild.textContent = '€/' + u + ' ';
     document.getElementById('thUnitRx').firstChild.textContent = u + '/Rx ';
   } else {
-    document.getElementById('thVolume').firstChild.textContent = 'Vol. (Units) ';
+    document.getElementById('thVolume').firstChild.textContent = 'Vol (Units) ';
     document.getElementById('thEpUnit').firstChild.textContent = '€/unit ';
     document.getElementById('thUnitRx').firstChild.textContent = 'units/Rx ';
   }
@@ -1179,7 +1179,7 @@ function populateSelect(id, options, allLabel) {
 
 function exportProductCSV() {
   if (!currentProducts.length) return;
-  const headers = ['Product', 'Brand', 'Category', 'Origin', '# Rx', 'Vol. (g)', 'Gross Rev €', 'Net Rev €', '€/g', 'g/Rx'];
+  const headers = ['Product', 'Brand', 'Category', 'Origin', '# Rx', 'Vol (g)', 'Gross Rev €', 'Net Rev €', '€/g', 'g/Rx'];
 
   // Use currently filtered data
   const brand    = document.getElementById('filterBrand')?.value || '';
