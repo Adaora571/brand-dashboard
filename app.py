@@ -193,7 +193,7 @@ NET_ORDER_FILTER = "AND o.payment_status NOT IN ('voided', 'refunded') AND o.is_
 # when passwords were last rotated (format: YYYY-MM-DD).
 # ============================================================
 MANUFACTURER_PASSWORDS = {
-    "cannamedical":  os.getenv("TOKEN_CANNAMEDICAL",  "canna2026htv"),
+    "cannamedical":  os.getenv("TOKEN_CANNAMEDICAL",  "Cn8#xR4mWq2026"),
     "four20":        os.getenv("TOKEN_FOUR20",         "Xp7#mK9vQ2wL"),
     "aurora":        os.getenv("TOKEN_AURORA",          "Nt4$hR8jF6bZ"),
     "demecan":       os.getenv("TOKEN_DEMECAN",         "Wy3@cL5nG9mP"),
