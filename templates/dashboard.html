@@ -950,7 +950,11 @@ function renderBreakdowns(data) {
   const ori=data.origins||[];
   createOrUpdate('chartOrigin',{type:'bar',data:{labels:ori.map(o=>o.origin),datasets:[{label:'Net Rev €',data:ori.map(o=>o.net_revenue_eur),backgroundColor:PALETTE.slice(0,ori.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const pt=data.price_tiers||[];
-  createOrUpdate('chartPrice',{type:'bar',data:{labels:pt.map(p=>p.price_tier),datasets:[{label:'Net Rev €',data:pt.map(p=>p.net_revenue_eur),backgroundColor:[COLORS.green,COLORS.blue,COLORS.teal,COLORS.purple,COLORS.orange]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  const ptU=getUnitLabel();
+  const ptSpecific=hasSpecificCategory();
+  const ptSuffix=(ptSpecific && ptU!=='units') ? '/'+ptU : '';
+  const ptLabels=pt.map(p=>p.price_tier.replace(/\/g\b/g, ptSuffix));
+  createOrUpdate('chartPrice',{type:'bar',data:{labels:ptLabels,datasets:[{label:'Net Rev €',data:pt.map(p=>p.net_revenue_eur),backgroundColor:[COLORS.green,COLORS.blue,COLORS.teal,COLORS.purple,COLORS.orange]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
 }
 
 function renderPatients(data) {

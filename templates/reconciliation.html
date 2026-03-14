@@ -942,12 +942,17 @@ function renderPriceTierChart() {
   const ctx = document.getElementById('chartPrice').getContext('2d');
   if (charts.price) charts.price.destroy();
 
+  const ptU = getUnitLabel();
+  const ptSpecific = hasSpecificCategory();
+  const ptSuffix = (ptSpecific && ptU !== 'units') ? '/' + ptU : '';
+  const ptLabels = tier.map(x => x.tier.replace(/\/g\b/g, ptSuffix));
+
   charts.price = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: tier.map(x => x.tier),
+      labels: ptLabels,
       datasets: [{
-        label: 'Volume (g)',
+        label: 'Net Revenue €',
         data: tier.map(x => x.volume),
         backgroundColor: tier.map((_, i) => PALETTE[i % PALETTE.length]),
       }]
@@ -955,7 +960,7 @@ function renderPriceTierChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      scales: { y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString() + 'g' } } }
+      scales: { y: { beginAtZero: true, ticks: { callback: v => '€' + (v/1000).toFixed(0) + 'k' } } }
     }
   });
 }
