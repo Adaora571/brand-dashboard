@@ -145,9 +145,13 @@
   .deal-card .deal-meta { text-align:right; font-size:11px; color:#b45309; }
 
   /* Fee & Product tables */
-  .fee-table, table.prod { width:100%; border-collapse:collapse; font-size:12px; }
-  .fee-table th, table.prod th { background:#f1f5f9; padding:8px 10px; text-align:left; font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; border-bottom:2px solid var(--border); white-space:nowrap; position:sticky; top:0; z-index:2; }
-  .fee-table td, table.prod td { padding:8px 10px; border-bottom:1px solid #f1f5f9; }
+  .fee-table, table.prod { width:100%; border-collapse:collapse; font-size:12px; table-layout:fixed; }
+  .fee-table th, table.prod th { background:#f1f5f9; padding:8px 10px; text-align:left; font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; border-bottom:2px solid var(--border); white-space:nowrap; position:sticky; top:0; z-index:2; overflow:hidden; text-overflow:ellipsis; }
+  .fee-table td, table.prod td { padding:8px 10px; border-bottom:1px solid #f1f5f9; overflow:hidden; text-overflow:ellipsis; }
+  table.prod th:nth-child(1), table.prod td:nth-child(1) { width:28%; white-space:normal; }
+  table.prod th:nth-child(2), table.prod td:nth-child(2) { width:11%; }
+  table.prod th:nth-child(3), table.prod td:nth-child(3) { width:8%; }
+  table.prod th:nth-child(4), table.prod td:nth-child(4) { width:6%; }
   .fee-table .r, table.prod .r { text-align:right; font-variant-numeric:tabular-nums; }
   .fee-table tfoot td { font-weight:700; background:#f8fafc; border-top:2px solid var(--border); }
   .tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600; }
