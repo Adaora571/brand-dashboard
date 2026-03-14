@@ -1040,7 +1040,7 @@ async def recon_page(request: Request):
         return templates.TemplateResponse("recon_login.html", {"request": request, "error": ""})
     return templates.TemplateResponse("reconciliation.html", {
         "request": request,
-        "brands": {slug: {"name": MANUFACTURER_BQ_NAMES[slug], "hash": f"{BRAND_HASHES[slug]}-{slug}"} for slug in MANUFACTURER_BQ_NAMES},
+        "brands": {slug: {"name": get_display_name(slug), "hash": f"{BRAND_HASHES[slug]}-{slug}"} for slug in MANUFACTURER_BQ_NAMES},
         "fees": MANUFACTURER_FEES,
     })
 
