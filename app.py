@@ -1270,44 +1270,6 @@ async def api_recon_pricing(request: Request, slug: str, start_date: str = "", e
     return await _get_pricing(mfg_name, slug, start_date, end_date, category)
 
 
-@app.get("/api/recon/debug/manufacturers")
-async def api_debug_manufacturers(request: Request):
-    """Debug: list all distinct product_manufacturer_name values in BQ."""
-    if not request.session.get("recon_auth"):
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    sql = f"""
-    SELECT DISTINCT oi.product_manufacturer_name AS mfg,
-           COUNT(DISTINCT o.order_id) AS order_count
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE o.created_at >= '2024-01-01' {NET_ORDER_FILTER}
-    GROUP BY 1 ORDER BY 2 DESC
-    """
-    rows = run_query(sql, [])
-    return {"manufacturers": rows}
-
-
-@app.get("/api/recon/debug/vayamed")
-async def api_debug_vayamed(request: Request):
-    """Debug: search for any product with 'vayamed' in name, brand, or manufacturer."""
-    if not request.session.get("recon_auth"):
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    sql = f"""
-    SELECT oi.product_name, oi.product_brand_name, oi.product_manufacturer_name,
-           oi.product_vertical AS category, o.payment_status, o.is_cancelled,
-           COUNT(*) AS cnt
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE (LOWER(oi.product_name) LIKE '%vayamed%'
-        OR LOWER(oi.product_brand_name) LIKE '%vayamed%'
-        OR LOWER(oi.product_manufacturer_name) LIKE '%vayamed%')
-    GROUP BY 1,2,3,4,5,6
-    ORDER BY cnt DESC
-    LIMIT 50
-    """
-    rows = run_query(sql, [])
-    return {"vayamed_results": rows}
-
 
 @app.get("/api/recon/{slug}/categories")
 async def api_recon_categories(request: Request, slug: str):
