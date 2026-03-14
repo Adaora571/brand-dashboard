@@ -5,75 +5,68 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Login — NordLeaf Reconciliation Dashboard</title>
 <style>
-  :root {
-    --primary: #1a0a2e; --primary-light: #2d1650; --accent: #1a0a2e;
-    --bg: #0d0618; --card: #1a0a2e;
-    --border: #3d2066; --text: #f1f5f9; --muted: #a89bc2;
-  }
   * { margin:0; padding:0; box-sizing:border-box; }
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg); color: var(--text); min-height: 100vh;
-    display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(145deg, #0d0618 0%, #1a0a2e 50%, #0d0618 100%);
+    background: #1a0a2e; color: #f1f5f9; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
   }
+  .top-logo {
+    text-align: center; margin-bottom: 28px;
+  }
+  .top-logo img { height: 30px; }
   .login-card {
-    background: rgba(26,10,46,0.6); border: 1px solid var(--border);
-    border-radius: 16px; padding: 48px 40px; width: 100%; max-width: 420px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    background: #fff; border-radius: 16px; padding: 44px 40px; width: 100%; max-width: 420px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    color: #1e293b;
   }
-  .logo {
-    text-align: center; margin-bottom: 32px;
+  .card-header {
+    text-align: center; margin-bottom: 28px;
   }
-  .logo img {
-    height: 32px; margin-bottom: 16px;
-  }
-  .logo h1 {
-    font-size: 20px; font-weight: 700; color: var(--text);
+  .card-header h1 {
+    font-size: 20px; font-weight: 700; color: #1a0a2e;
     letter-spacing: -0.3px;
   }
-  .logo p {
-    font-size: 13px; color: var(--muted); margin-top: 6px;
+  .card-header p {
+    font-size: 13px; color: #64748b; margin-top: 6px;
   }
   .form-group {
     margin-bottom: 20px;
   }
   .form-group label {
     display: block; font-size: 12px; font-weight: 600;
-    color: var(--muted); margin-bottom: 6px; text-transform: uppercase;
+    color: #64748b; margin-bottom: 6px; text-transform: uppercase;
     letter-spacing: 0.5px;
   }
   .form-group input {
     width: 100%; padding: 12px 14px; font-size: 14px;
-    background: rgba(13,6,24,0.6); border: 1px solid var(--border);
-    border-radius: 8px; color: var(--text); outline: none;
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 8px; color: #1e293b; outline: none;
     font-family: inherit; transition: border-color 0.2s;
   }
   .form-group input:focus {
-    border-color: #7c5cbf;
+    border-color: #1a0a2e; box-shadow: 0 0 0 3px rgba(26,10,46,0.1);
   }
   .form-group input::placeholder {
-    color: #5a4578;
+    color: #94a3b8;
   }
   .btn-login {
     width: 100%; padding: 12px; font-size: 14px; font-weight: 600;
-    background: linear-gradient(135deg, #2d1650 0%, #1a0a2e 100%);
-    color: #fff; border: 1px solid #3d2066;
+    background: #1a0a2e; color: #fff; border: none;
     border-radius: 8px; cursor: pointer; font-family: inherit;
-    transition: all 0.2s; margin-top: 8px;
+    transition: background 0.2s; margin-top: 8px;
   }
-  .btn-login:hover { background: linear-gradient(135deg, #3d2066 0%, #2d1650 100%); border-color: #7c5cbf; }
+  .btn-login:hover { background: #2d1650; }
   .btn-login:disabled {
     opacity: 0.5; cursor: not-allowed;
   }
   .error-msg {
-    background: rgba(69,26,26,0.6); border: 1px solid #7f1d1d; color: #fca5a5;
+    background: #fef2f2; border: 1px solid #fecaca; color: #dc2626;
     border-radius: 8px; padding: 10px 14px; font-size: 13px;
     margin-bottom: 20px; display: {% if error %}block{% else %}none{% endif %};
   }
   .security-note {
-    text-align: center; margin-top: 24px; font-size: 11px; color: #5a4578;
+    text-align: center; margin-top: 24px; font-size: 11px; color: #94a3b8;
   }
   .security-note svg {
     vertical-align: middle; margin-right: 4px;
@@ -81,9 +74,12 @@
 </style>
 </head>
 <body>
+  <div class="top-logo">
+    <img src="/static/logos/nordleaf.svg" alt="NordLeaf">
+  </div>
+
   <div class="login-card">
-    <div class="logo">
-      <img src="/static/logos/nordleaf.svg" alt="NordLeaf">
+    <div class="card-header">
       <h1>Reconciliation Dashboard</h1>
       <p>Internal access only</p>
     </div>
@@ -101,7 +97,7 @@
     </form>
 
     <div class="security-note">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5a4578" stroke-width="2">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2">
         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
         <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
       </svg>
