@@ -264,6 +264,7 @@
           <button class="preset-btn" data-preset="last30" onclick="selectPreset(this)">Last 30 days</button>
           <button class="preset-btn" data-preset="last90" onclick="selectPreset(this)">Last 90 days</button>
           <button class="preset-btn" data-preset="last12m" onclick="selectPreset(this)">Last 12 months</button>
+          <button class="preset-btn" data-preset="lastmonth" onclick="selectPreset(this)">Last Month</button>
           <button class="preset-btn" data-preset="mtd" onclick="selectPreset(this)">Month to date</button>
           <button class="preset-btn active" data-preset="ytd" onclick="selectPreset(this)">Year to date</button>
           <button class="preset-btn" data-preset="custom" onclick="selectPreset(this)">Custom</button>
@@ -1104,6 +1105,12 @@ function selectPreset(btn) {
       from = isoDate(addDays(today, -89)); break;
     case 'last12m':
       from = isoDate(addMonths(today, -12)); break;
+    case 'lastmonth': {
+      const lm = new Date(today.getFullYear(), today.getMonth()-1, 1);
+      from = isoDate(lm);
+      to = isoDate(new Date(today.getFullYear(), today.getMonth(), 0));
+      break;
+    }
     case 'mtd':
       from = todayStr.slice(0,8) + '01'; break;
     case 'ytd':
