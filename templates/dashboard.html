@@ -1198,7 +1198,7 @@ function updateTriggerText(from, to) {
 }
 
 // ---- date helpers ----
-function isoDate(d) { return d.toISOString().slice(0,10); }
+function isoDate(d) { const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate()+n); return r; }
 function addMonths(d, n) { const r = new Date(d); r.setMonth(r.getMonth()+n); return r; }
 function addYears(d, n) { const r = new Date(d); r.setFullYear(r.getFullYear()+n); return r; }
