@@ -145,13 +145,10 @@
   .deal-card .deal-meta { text-align:right; font-size:11px; color:#b45309; }
 
   /* Fee & Product tables */
-  .fee-table, table.prod { width:100%; border-collapse:collapse; font-size:12px; table-layout:fixed; }
-  .fee-table th, table.prod th { background:#f1f5f9; padding:8px 10px; text-align:left; font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; border-bottom:2px solid var(--border); white-space:nowrap; position:sticky; top:0; z-index:2; overflow:hidden; text-overflow:ellipsis; }
-  .fee-table td, table.prod td { padding:8px 10px; border-bottom:1px solid #f1f5f9; overflow:hidden; text-overflow:ellipsis; }
-  table.prod th:nth-child(1), table.prod td:nth-child(1) { width:28%; white-space:normal; }
-  table.prod th:nth-child(2), table.prod td:nth-child(2) { width:11%; }
-  table.prod th:nth-child(3), table.prod td:nth-child(3) { width:8%; }
-  table.prod th:nth-child(4), table.prod td:nth-child(4) { width:6%; }
+  .fee-table, table.prod { width:100%; border-collapse:collapse; font-size:12px; }
+  .fee-table th, table.prod th { background:#f1f5f9; padding:8px 10px; text-align:left; font-weight:600; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.3px; border-bottom:2px solid var(--border); white-space:nowrap; position:sticky; top:0; z-index:2; }
+  .fee-table td, table.prod td { padding:8px 10px; border-bottom:1px solid #f1f5f9; }
+  table.prod td:first-child { white-space:normal; max-width:320px; }
   .fee-table .r, table.prod .r { text-align:right; font-variant-numeric:tabular-nums; }
   .fee-table tfoot td { font-weight:700; background:#f8fafc; border-top:2px solid var(--border); }
   .tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600; }
@@ -357,6 +354,25 @@
   </div>
 </div>
 </div><!-- /feeSection -->
+
+<!-- MANUFACTURER SUMMARY (All Brands only) -->
+<div id="mfrSection" style="display:none;">
+<div class="section-title"><span class="num">★</span> Manufacturer Summary</div>
+<div class="card" style="overflow-x:auto;">
+  <table class="fee-table" id="mfrTableEl">
+    <thead>
+      <tr>
+        <th style="cursor:pointer;" onclick="sortMfrTable('manufacturer')">Manufacturer ▼</th>
+        <th class="r" style="cursor:pointer;" onclick="sortMfrTable('volume_units')">Net Units Sold ▼</th>
+        <th class="r" style="cursor:pointer;" onclick="sortMfrTable('net_revenue_eur')">Net Revenue € ▼</th>
+        <th class="r">% of Total Revenue</th>
+      </tr>
+    </thead>
+    <tbody id="mfrBody"></tbody>
+    <tfoot id="mfrFoot"></tfoot>
+  </table>
+</div>
+</div>
 
 <!-- SECTION 3: PRODUCT PERFORMANCE -->
 <div class="section-title"><span class="num">3</span> Product Performance <span class="filter-tag" id="filterTag"></span></div>
@@ -582,6 +598,7 @@ async function changeBrand() {
   // Show/hide Fee Terms section based on brand selection
   const feeSection = document.getElementById('feeSection');
   feeSection.style.display = (selectedBrandSlug === 'all') ? 'none' : '';
+  document.getElementById('mfrSection').style.display = (selectedBrandSlug === 'all') ? '' : 'none';
   // Reload categories if brand changed (not just category filter change)
   if (selectedBrandSlug !== prevSlug) await loadCategories();
   await loadAll();
@@ -632,6 +649,7 @@ function render() {
   renderDealTerms();
   renderFees();
   renderProducts();
+  renderManufacturerTable();
   renderCharts();
   renderPatientCharts();
 }
@@ -1068,6 +1086,53 @@ function renderRegionChart() {
       scales: { y: { beginAtZero: true } }
     }
   });
+}
+
+// ============================================================
+// MANUFACTURER SUMMARY TABLE
+// ============================================================
+let mfrSortCol = 'net_revenue_eur';
+let mfrSortAsc = false;
+
+function renderManufacturerTable() {
+  if (selectedBrandSlug !== 'all') return;
+  const mfrs = allData.manufacturers || [];
+  if (!mfrs.length) return;
+
+  const sorted = [...mfrs].sort((a, b) => {
+    const va = a[mfrSortCol] ?? '';
+    const vb = b[mfrSortCol] ?? '';
+    if (typeof va === 'string') return mfrSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    return mfrSortAsc ? va - vb : vb - va;
+  });
+
+  const totalRev = sorted.reduce((s, r) => s + (r.net_revenue_eur || 0), 0);
+  const totalVol = sorted.reduce((s, r) => s + (r.volume_units || 0), 0);
+
+  const tbody = document.getElementById('mfrBody');
+  tbody.innerHTML = sorted.map(r => {
+    const pct = totalRev ? (r.net_revenue_eur / totalRev * 100).toFixed(1) : '0.0';
+    return `<tr>
+      <td style="font-weight:600;">${r.manufacturer}</td>
+      <td class="r">${Math.round(r.volume_units || 0).toLocaleString('en-US')}</td>
+      <td class="r">€${Math.round(r.net_revenue_eur || 0).toLocaleString('en-US')}</td>
+      <td class="r">${pct}%</td>
+    </tr>`;
+  }).join('');
+
+  const tfoot = document.getElementById('mfrFoot');
+  tfoot.innerHTML = `<tr>
+    <td style="font-weight:700;">Total</td>
+    <td class="r" style="font-weight:700;">${Math.round(totalVol).toLocaleString('en-US')}</td>
+    <td class="r" style="font-weight:700;">€${Math.round(totalRev).toLocaleString('en-US')}</td>
+    <td class="r" style="font-weight:700;">100%</td>
+  </tr>`;
+}
+
+function sortMfrTable(col) {
+  if (mfrSortCol === col) { mfrSortAsc = !mfrSortAsc; }
+  else { mfrSortCol = col; mfrSortAsc = col === 'manufacturer'; }
+  renderManufacturerTable();
 }
 
 function renderProducts() {

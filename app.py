@@ -825,13 +825,23 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
-    # Run all 5 queries in parallel instead of sequentially
-    cats, oris, pts, ppos, brands = await asyncio.gather(
+    mfr_sql = f"""
+    SELECT COALESCE(oi.product_manufacturer_name, 'Unknown') AS manufacturer,
+      SUM(oi.quantity_after_cancellations) AS volume_units,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+    FROM `{PROJECT_DATASET}.order_items` oi
+    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
+    GROUP BY 1 ORDER BY net_revenue_eur DESC
+    """
+    # Run all 6 queries in parallel instead of sequentially
+    cats, oris, pts, ppos, brands, mfrs = await asyncio.gather(
         run_query_async(cat_sql, list(base_params)),
         run_query_async(ori_sql, list(base_params)),
         run_query_async(pt_sql, list(base_params)),
         run_query_async(ppo_sql, list(base_params)),
         run_query_async(brand_sql, list(base_params)),
+        run_query_async(mfr_sql, list(base_params)),
     )
     result = {
         "categories": cats,
@@ -839,6 +849,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
         "price_tiers": pts,
         "products_per_order": ppos,
         "brands": brands,
+        "manufacturers": mfrs,
     }
     cache_set(ck, result)
     return result
@@ -1152,6 +1163,7 @@ async def api_recon_combined(
     pt_out = [{"tier": r["price_tier"], "volume": r.get("net_revenue_eur", 0)} for r in breakdowns.get("price_tiers", [])]
     ppo_out = [{"num_products": r["products_per_order"], "count": r.get("order_count", 0)} for r in breakdowns.get("products_per_order", [])]
     brand_out = [{"brand": r["brand"], "prescriptions": r.get("prescriptions", 0), "net_revenue_eur": r.get("net_revenue_eur", 0)} for r in breakdowns.get("brands", [])]
+    mfr_out = [{"manufacturer": r["manufacturer"], "volume_units": r.get("volume_units", 0), "net_revenue_eur": r.get("net_revenue_eur", 0)} for r in breakdowns.get("manufacturers", [])]
 
     # Map products
     prod_data = products.get("data", [])
@@ -1188,6 +1200,7 @@ async def api_recon_combined(
         "price_tier": pt_out,
         "ppo_dist": ppo_out,
         "brands": brand_out,
+        "manufacturers": mfr_out,
         "products": prod_out,
         "patient_new_returning": pat_nr,
         "patient_age": pat_age,
