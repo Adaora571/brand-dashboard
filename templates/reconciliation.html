@@ -568,6 +568,10 @@ async function initBrands() {
   document.getElementById('compareEnd').value = cmp.end;
   updateTriggerText(document.getElementById('startDate').value, todayStr);
 
+  // Show manufacturer section and hide fee section for "All Brands" default view
+  document.getElementById('mfrSection').style.display = '';
+  document.getElementById('feeSection').style.display = 'none';
+
   // Load categories and data for "All Brands" on page load
   await loadCategories();
   await loadAll();
