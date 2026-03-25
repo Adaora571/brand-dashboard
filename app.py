@@ -1305,3 +1305,24 @@ async def api_recon_categories(request: Request, slug: str):
 async def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
+
+@app.get("/api/data-freshness")
+async def data_freshness():
+    """Check the latest order date in BigQuery — useful for diagnosing pipeline lag."""
+    sql = f"""
+    SELECT
+      MAX(DATE(o.created_at)) AS latest_order_date,
+      COUNT(DISTINCT CASE WHEN DATE(o.created_at) = (SELECT MAX(DATE(created_at)) FROM `{PROJECT_DATASET}.orders`) THEN o.order_id END) AS orders_on_latest_day,
+      COUNT(DISTINCT o.order_id) AS total_orders_last_7d
+    FROM `{PROJECT_DATASET}.orders` o
+    WHERE DATE(o.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+    """
+    rows = run_query(sql, [])
+    r = rows[0] if rows else {}
+    return {
+        "latest_order_date": str(r.get("latest_order_date", "unknown")),
+        "orders_on_latest_day": r.get("orders_on_latest_day", 0),
+        "total_orders_last_7d": r.get("total_orders_last_7d", 0),
+        "checked_at": datetime.now().isoformat(),
+    }
+
