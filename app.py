@@ -298,18 +298,18 @@ MANUFACTURER_FEES = {
         "notes": "",
     },
     "sanitygroup": {
-        "type": "advance", "rate": 0.375,
-        "label": "€300k prepaid (800 kg)", "desc": "Advance — €300,000 for 800 kg",
-        "effective_date": "2025-01-01",
-        "notes": "Prepaid 800 kg; new contract after volume fulfilled",
-        "advance_total_eur": 300000,
-        "advance_total_kg": 800,
+        "type": "per_gram", "rate": 0.30,
+        "label": "250 kg free → €0.30/g", "desc": "250 kg one-time free, then €0.30/g (2026); €0.40/g from 2027",
+        "effective_date": "2026-04-01",
+        "notes": "Replaces advance deal from Apr 2026. 250 kg one-time free allowance, then €0.30/g rest of 2026, €0.40/g from Jan 2027.",
+        "free_kg": 250,
+        "rate_2027": 0.40,
     },
     "cantourage": {
-        "type": "per_gram", "rate": 0.00,
-        "label": "TBD", "desc": "Fee terms to be confirmed",
+        "type": "per_gram", "rate": 0.40,
+        "label": "€0.40 / g", "desc": "Per-gram transaction fee",
         "effective_date": "2026-01-01",
-        "notes": "Pending contract finalisation",
+        "notes": "",
     },
 }
 # ============================================================
@@ -359,7 +359,9 @@ def calc_fee(fee_info: dict, volume_g, revenue, months: int = 1) -> float:
     vol = float(volume_g or 0)
     rev = float(revenue or 0)
     if t == "per_gram":
-        return vol * r
+        free_g = fee_info.get("free_kg", 0) * 1000  # one-time free allowance
+        billable = max(0, vol - free_g)
+        return billable * r
     elif t == "percentage":
         return rev * r
     elif t == "fixed":
