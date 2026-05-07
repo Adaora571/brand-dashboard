@@ -71,6 +71,7 @@ BRAND_HASHES = {
     "alephsana": "f6b1d8",
     "iuvo": "a8e4c3",
     "sanitygroup": "d2f7b6",
+    "cantourage": "b4c8d1",
 }
 
 # Reverse lookup: hashed_slug → slug
@@ -96,6 +97,7 @@ BRAND_CONFIG = {
     "alephsana":    {"color": "#103C3A", "logo": "https://www.alephsana.com/wp-content/uploads/2023/02/AlephSana_Logo_Lockup_Stacked_alephGreen.svg", "name": "AlephSana", "logo_invert": True, "logo_height": 48},
     "iuvo":         {"color": "#000000", "logo": "https://cdn.prod.website-files.com/64231bdbeac474fbfe4ff7c7/642323c0d6586d71c14b9bda_IUVO-Logo.svg", "name": "IUVO", "logo_invert": False},
     "sanitygroup":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True, "logo_height": 30, "logo_gap": 10, "logo_header_padding": 16, "subtitle_margin_top": 0},
+    "cantourage":         {"color": "#1B365D", "logo": "https://cantourage.com/wp-content/uploads/2023/01/Cantourage-Logo.svg", "name": "Cantourage", "logo_invert": True},
 }
 
 # ============================================================
@@ -201,6 +203,7 @@ MANUFACTURER_PASSWORDS = {
     "alephsana":     os.getenv("TOKEN_ALEPHSANA",       "Bq9$wM4rH7nC"),
     "iuvo":          os.getenv("TOKEN_IUVO",            "Zj5@tN8kD3vR"),
     "sanitygroup":         os.getenv("TOKEN_SANITYGROUP",     "Lm7#gX2cF9pW"),
+    "cantourage":          os.getenv("TOKEN_CANTOURAGE",      "Ht9#qW3mK7vP"),
 }
 
 # Password set dates — used for 90-day expiry. Default = today (first deploy).
@@ -222,6 +225,7 @@ MANUFACTURER_BQ_NAMES = {
     "alephsana":     "AlephSana",
     "iuvo":          "IUVO",
     "sanitygroup":   ["Sanity Group", "avaay Medical", "Vayamed"],
+    "cantourage":    "Cantourage",
 }
 
 
@@ -300,6 +304,12 @@ MANUFACTURER_FEES = {
         "notes": "Prepaid 800 kg; new contract after volume fulfilled",
         "advance_total_eur": 300000,
         "advance_total_kg": 800,
+    },
+    "cantourage": {
+        "type": "per_gram", "rate": 0.00,
+        "label": "TBD", "desc": "Fee terms to be confirmed",
+        "effective_date": "2026-01-01",
+        "notes": "Pending contract finalisation",
     },
 }
 # ============================================================

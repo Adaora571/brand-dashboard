@@ -24,3 +24,5 @@ services:
         generateValue: true
       - key: TOKEN_IUVO
         generateValue: true
+      - key: TOKEN_CANTOURAGE
+        generateValue: true
