@@ -97,7 +97,7 @@ BRAND_CONFIG = {
     "alephsana":    {"color": "#103C3A", "logo": "https://www.alephsana.com/wp-content/uploads/2023/02/AlephSana_Logo_Lockup_Stacked_alephGreen.svg", "name": "AlephSana", "logo_invert": True, "logo_height": 48},
     "iuvo":         {"color": "#000000", "logo": "https://cdn.prod.website-files.com/64231bdbeac474fbfe4ff7c7/642323c0d6586d71c14b9bda_IUVO-Logo.svg", "name": "IUVO", "logo_invert": False},
     "sanitygroup":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True, "logo_height": 30, "logo_gap": 10, "logo_header_padding": 16, "subtitle_margin_top": 0},
-    "cantourage":         {"color": "#1B365D", "logo": "/static/logos/cantourage.svg", "name": "Cantourage", "logo_invert": False},
+    "cantourage":         {"color": "#1B365D", "logo": "/static/logos/cantourage.svg", "name": "Cantourage", "logo_invert": False, "logo_height": 30, "logo_gap": 10, "show_name": True},
 }
 
 # ============================================================
