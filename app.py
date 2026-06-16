@@ -72,6 +72,9 @@ BRAND_HASHES = {
     "iuvo": "a8e4c3",
     "sanitygroup": "d2f7b6",
     "cantourage": "b4c8d1",
+    "montu": "e7a2f5",
+    "novacana": "c3d9b7",
+    "kineo": "f1e8a4",
 }
 
 # Reverse lookup: hashed_slug → slug
@@ -98,6 +101,9 @@ BRAND_CONFIG = {
     "iuvo":         {"color": "#000000", "logo": "https://cdn.prod.website-files.com/64231bdbeac474fbfe4ff7c7/642323c0d6586d71c14b9bda_IUVO-Logo.svg", "name": "IUVO", "logo_invert": False},
     "sanitygroup":        {"color": "#181A1B", "logo": "/static/logos/sanitygroup.svg", "name": "Sanity Group", "logo_invert": True, "logo_height": 30, "logo_gap": 10, "logo_header_padding": 16, "subtitle_margin_top": 0},
     "cantourage":         {"color": "#1B365D", "logo": "/static/logos/cantourage.svg", "name": "Cantourage", "logo_invert": False, "logo_height": 30, "logo_gap": 10, "show_name": True},
+    "montu":              {"color": "#1A1A2E", "logo": "/static/logos/montu.svg", "name": "Montu", "logo_invert": False},
+    "novacana":           {"color": "#2D5F2D", "logo": "/static/logos/novacana.svg", "name": "Novacana", "logo_invert": False},
+    "kineo":              {"color": "#4A2C6E", "logo": "", "name": "Kineo"},
 }
 
 # ============================================================
@@ -204,6 +210,8 @@ MANUFACTURER_PASSWORDS = {
     "iuvo":          os.getenv("TOKEN_IUVO",            "Zj5@tN8kD3vR"),
     "sanitygroup":         os.getenv("TOKEN_SANITYGROUP",     "Lm7#gX2cF9pW"),
     "cantourage":          os.getenv("TOKEN_CANTOURAGE",      "Ht9#qW3mK7vP"),
+    "montu":               os.getenv("TOKEN_MONTU",           "Xr6#bN4wJ9mT"),
+    "novacana":            os.getenv("TOKEN_NOVACANA",        "Kp8$vC2hL5qR"),
 }
 
 # Password set dates — used for 90-day expiry. Default = today (first deploy).
@@ -226,6 +234,9 @@ MANUFACTURER_BQ_NAMES = {
     "iuvo":          "IUVO",
     "sanitygroup":   ["Sanity Group", "avaay Medical", "Vayamed"],
     "cantourage":    "Cantourage",
+    "montu":         "Montu",
+    "novacana":      "Novacana",
+    "kineo":         "Kineo",
 }
 
 
@@ -299,10 +310,10 @@ MANUFACTURER_FEES = {
     },
     "sanitygroup": {
         "type": "per_gram", "rate": 0.30,
-        "label": "250 kg free → €0.30/g", "desc": "250 kg one-time free, then €0.30/g (2026); €0.40/g from 2027",
+        "label": "1,150 kg free → €0.30/g", "desc": "1,150 kg one-time free (800+350), then €0.30/g (2026); €0.40/g from 2027",
         "effective_date": "2026-04-01",
-        "notes": "Replaces advance deal from Apr 2026. 250 kg one-time free allowance, then €0.30/g rest of 2026, €0.40/g from Jan 2027.",
-        "free_kg": 250,
+        "notes": "Replaces advance deal from Apr 2026. 1,150 kg one-time free (800 original + 350 additional), then €0.30/g rest of 2026, €0.40/g from Jan 2027.",
+        "free_kg": 1150,
         "rate_2027": 0.40,
     },
     "cantourage": {
@@ -310,6 +321,24 @@ MANUFACTURER_FEES = {
         "label": "€0.40 / g", "desc": "Per-gram transaction fee",
         "effective_date": "2026-01-01",
         "notes": "",
+    },
+    "montu": {
+        "type": "per_gram", "rate": 0.50,
+        "label": "€0.50 / g", "desc": "Per-gram transaction fee",
+        "effective_date": "2026-01-01",
+        "notes": "",
+    },
+    "novacana": {
+        "type": "per_gram", "rate": 0.30,
+        "label": "€0.30 / g", "desc": "Per-gram transaction fee",
+        "effective_date": "2026-01-01",
+        "notes": "",
+    },
+    "kineo": {
+        "type": "per_gram", "rate": 0.00,
+        "label": "TBD", "desc": "Fee terms to be confirmed",
+        "effective_date": "2026-01-01",
+        "notes": "Pending contract finalisation",
     },
 }
 # ============================================================
