@@ -30,3 +30,5 @@ services:
         generateValue: true
       - key: TOKEN_NOVACANA
         generateValue: true
+      - key: TOKEN_DUNBAR
+        generateValue: true

@@ -75,6 +75,7 @@ BRAND_HASHES = {
     "montu": "e7a2f5",
     "novacana": "c3d9b7",
     "kineo": "f1e8a4",
+    "dunbar": "d8f3a9",
 }
 
 # Reverse lookup: hashed_slug → slug
@@ -104,6 +105,7 @@ BRAND_CONFIG = {
     "montu":              {"color": "#1A1A2E", "logo": "/static/logos/montu.svg", "name": "Montu", "logo_invert": False},
     "novacana":           {"color": "#2D5F2D", "logo": "/static/logos/novacana.svg", "name": "Novacana", "logo_invert": False},
     "kineo":              {"color": "#4A2C6E", "logo": "", "name": "Kineo"},
+    "dunbar":             {"color": "#2C3E50", "logo": "", "name": "Dunbar Pharma"},
 }
 
 # ============================================================
@@ -212,6 +214,7 @@ MANUFACTURER_PASSWORDS = {
     "cantourage":          os.getenv("TOKEN_CANTOURAGE",      "Ht9#qW3mK7vP"),
     "montu":               os.getenv("TOKEN_MONTU",           "Xr6#bN4wJ9mT"),
     "novacana":            os.getenv("TOKEN_NOVACANA",        "Kp8$vC2hL5qR"),
+    "dunbar":              os.getenv("TOKEN_DUNBAR",          "Dm4#hT7nR2wK"),
 }
 
 # Password set dates — used for 90-day expiry. Default = today (first deploy).
@@ -237,6 +240,7 @@ MANUFACTURER_BQ_NAMES = {
     "montu":         "Montu",
     "novacana":      "Novacana",
     "kineo":         "Kineo",
+    "dunbar":        {"manufacturer": "AlephSana", "product_filter": "Kapseln"},
 }
 
 
@@ -247,9 +251,29 @@ def mfg_clause(mfg_name):
     When a list is provided, uses IN UNNEST() to match any of the names,
     which merges data from multiple BQ manufacturer entries into one view.
     When mfg_name is None (all-brands view), returns a no-op TRUE clause.
+
+    Special dict form: {"manufacturer": "X", "product_filter": "Y"}
+    filters by manufacturer AND product_name LIKE '%Y%'. Used for sub-brand
+    dashboards (e.g. Dunbar sees only AlephSana capsules).
     """
     if mfg_name is None:
         return ("TRUE", [])
+    if isinstance(mfg_name, dict):
+        # Sub-brand filter: manufacturer + product name contains keyword
+        clauses = []
+        params = []
+        mfr = mfg_name.get("manufacturer")
+        if isinstance(mfr, list):
+            clauses.append("oi.product_manufacturer_name IN UNNEST(@mfg_names)")
+            params.append(bigquery.ArrayQueryParameter("mfg_names", "STRING", mfr))
+        else:
+            clauses.append("oi.product_manufacturer_name = @mfg")
+            params.append(bigquery.ScalarQueryParameter("mfg", "STRING", mfr))
+        pf = mfg_name.get("product_filter")
+        if pf:
+            clauses.append("LOWER(oi.product_name) LIKE LOWER(@product_filter)")
+            params.append(bigquery.ScalarQueryParameter("product_filter", "STRING", f"%{pf}%"))
+        return (" AND ".join(clauses), params)
     if isinstance(mfg_name, list):
         return (
             "oi.product_manufacturer_name IN UNNEST(@mfg_names)",
@@ -1084,6 +1108,9 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
 # ============================================================
 HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "Rv3#nL8kT5wQ")
 
+# Brands that only have external dashboards (not shown in recon brand dropdown)
+DASHBOARD_ONLY_BRANDS = {"dunbar"}
+
 
 @app.get("/reconciliation", response_class=HTMLResponse)
 async def recon_page(request: Request):
@@ -1092,7 +1119,8 @@ async def recon_page(request: Request):
         return templates.TemplateResponse("recon_login.html", {"request": request, "error": ""})
     return templates.TemplateResponse("reconciliation.html", {
         "request": request,
-        "brands": {slug: {"name": get_display_name(slug), "hash": f"{BRAND_HASHES[slug]}-{slug}"} for slug in MANUFACTURER_BQ_NAMES},
+        "brands": {slug: {"name": get_display_name(slug), "hash": f"{BRAND_HASHES[slug]}-{slug}"}
+                   for slug in MANUFACTURER_BQ_NAMES if slug not in DASHBOARD_ONLY_BRANDS},
         "fees": MANUFACTURER_FEES,
     })
 
