@@ -1196,13 +1196,27 @@ async def api_recon_combined(
     else:
         mfg_name = MANUFACTURER_BQ_NAMES[slug]
 
+    # Calculate comparison period dates for patient comparison
+    s = start or "2020-01-01"
+    e = end or datetime.now().strftime("%Y-%m-%d")
+    if cstart and cend:
+        comp_s, comp_e = cstart, cend
+    else:
+        s_dt = datetime.strptime(s, "%Y-%m-%d")
+        e_dt = datetime.strptime(e, "%Y-%m-%d")
+        span = (e_dt - s_dt).days
+        comp_e_dt = s_dt - timedelta(days=1)
+        comp_s_dt = comp_e_dt - timedelta(days=span)
+        comp_s, comp_e = comp_s_dt.strftime("%Y-%m-%d"), comp_e_dt.strftime("%Y-%m-%d")
+
     # Run all queries in parallel (including platform total for market share)
-    summary, trends, products, breakdowns, patients, pricing, platform_rx = await asyncio.gather(
+    summary, trends, products, breakdowns, patients, patients_prev, pricing, platform_rx = await asyncio.gather(
         _get_summary(mfg_name, slug, start, end, category, cstart, cend),
         _get_trends(mfg_name, slug, start, end, category),
         _get_products(mfg_name, slug, start, end, category=category),
         _get_breakdowns(mfg_name, slug, start, end, category),
         _get_patients(mfg_name, slug, start, end, category),
+        _get_patients(mfg_name, slug, comp_s, comp_e, category),
         _get_pricing(mfg_name, slug, start, end, category),
         _get_platform_total_rx(start, end, category),
     )
@@ -1298,18 +1312,29 @@ async def api_recon_combined(
         "gpx": r.get("avg_g_per_rx"),
     } for r in prod_data]
 
-    # Map patients
+    # Map patients (current period)
     nr = patients.get("new_returning", [])
-    # Aggregate new/returning across all periods (counts + revenue + orders)
     new_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "new")
     ret_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "returning")
     new_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr if r.get("patient_type") == "new")
     ret_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr if r.get("patient_type") == "returning")
     new_orders = sum(r.get("order_count", 0) for r in nr if r.get("patient_type") == "new")
     ret_orders = sum(r.get("order_count", 0) for r in nr if r.get("patient_type") == "returning")
+
+    # Map patients (previous period for comparison)
+    nr_prev = patients_prev.get("new_returning", [])
+    prev_new = sum(r["patient_count"] for r in nr_prev if r.get("patient_type") == "new")
+    prev_ret = sum(r["patient_count"] for r in nr_prev if r.get("patient_type") == "returning")
+    prev_new_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr_prev if r.get("patient_type") == "new")
+    prev_ret_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr_prev if r.get("patient_type") == "returning")
+    prev_new_orders = sum(r.get("order_count", 0) for r in nr_prev if r.get("patient_type") == "new")
+    prev_ret_orders = sum(r.get("order_count", 0) for r in nr_prev if r.get("patient_type") == "returning")
+
     pat_nr = [
-        {"status": "New", "count": new_total, "revenue": new_rev, "orders": new_orders},
-        {"status": "Returning", "count": ret_total, "revenue": ret_rev, "orders": ret_orders},
+        {"status": "New", "count": new_total, "revenue": new_rev, "orders": new_orders,
+         "prev_count": prev_new, "prev_revenue": prev_new_rev, "prev_orders": prev_new_orders},
+        {"status": "Returning", "count": ret_total, "revenue": ret_rev, "orders": ret_orders,
+         "prev_count": prev_ret, "prev_revenue": prev_ret_rev, "prev_orders": prev_ret_orders},
     ]
     pat_age = [{"age_segment": r["age_segment"], "count": r.get("patient_count", 0)} for r in patients.get("age_segments", [])]
     pat_reg = [{"region": r["region"], "count": r.get("patient_count", 0)} for r in patients.get("regions", [])]

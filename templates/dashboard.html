@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Brand Dashboard — {{ manufacturer_name }}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
 <style>
   :root {
     --primary: #1a0a2e; --accent: #0589D3; --light-bg: #E8F4FD; --navy: #2d1650;
@@ -438,6 +439,24 @@
 </div>
 
 <script>
+Chart.register(ChartDataLabels);
+Chart.defaults.plugins.datalabels = { display: false };
+
+function fmtLabel(v) {
+  if (v === null || v === undefined) return '';
+  const abs = Math.abs(v);
+  if (abs >= 1000000) return '€' + (v/1000000).toFixed(1) + 'M';
+  if (abs >= 1000) return '€' + (v/1000).toFixed(0) + 'k';
+  return '€' + v.toFixed(0);
+}
+function fmtLabelUnits(v) {
+  if (v === null || v === undefined) return '';
+  const abs = Math.abs(v);
+  if (abs >= 1000000) return (v/1000000).toFixed(1) + 'M';
+  if (abs >= 1000) return (v/1000).toFixed(0) + 'k';
+  return v.toFixed(0);
+}
+
 const SLUG = "{{ hashed_slug }}";
 const API = `/api/brand/${SLUG}`;
 
@@ -876,10 +895,10 @@ function renderTrends(data) {
   const isGenericUnit = (u === 'units');
   const volLabel = (specific && !isGenericUnit) ? 'Volume ('+u+')' : 'Volume (Units)';
   const yTitle = (specific && !isGenericUnit) ? getUnitFull().charAt(0).toUpperCase()+getUnitFull().slice(1) : 'Volume';
-  createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:'Gross Revenue (€)',data:rows.map(r=>r.revenue_eur),backgroundColor:rows.map((_,i)=>PALETTE[i%PALETTE.length]),yAxisID:'y'},{label:volLabel,data:rows.map(r=>r.sales_volume_g),type:'line',borderColor:'#13375E',borderWidth:2,yAxisID:'y1',fill:false,tension:0.3,pointBackgroundColor:'#13375E'}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'+((specific&&!isGenericUnit)?u:'')}}}}});
+  createOrUpdate('chartTrend',{type:'bar',data:{labels,datasets:[{label:'Gross Revenue (€)',data:rows.map(r=>r.revenue_eur),backgroundColor:rows.map((_,i)=>PALETTE[i%PALETTE.length]),yAxisID:'y',datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>fmtLabel(v)}},{label:volLabel,data:rows.map(r=>r.sales_volume_g),type:'line',borderColor:'#13375E',borderWidth:2,yAxisID:'y1',fill:false,tension:0.3,pointBackgroundColor:'#13375E',datalabels:{display:false}}]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},scales:{y:{beginAtZero:true,position:'left',ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}},y1:{beginAtZero:true,position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'+((specific&&!isGenericUnit)?u:'')}}}}});
   const gR=rows.map((r,i)=>i===0?null:((r.revenue_eur-rows[i-1].revenue_eur)/rows[i-1].revenue_eur*100));
   const gV=rows.map((r,i)=>i===0?null:((r.sales_volume_g-rows[i-1].sales_volume_g)/rows[i-1].sales_volume_g*100));
-  createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'Gross Revenue %',data:gR,borderColor:'#1a0a2e',borderWidth:2,backgroundColor:'rgba(26,10,46,0.35)',fill:true,tension:0.3,pointRadius:3},{label:'Volume %',data:gV,borderColor:'#16a34a',borderWidth:2,tension:0.3,pointRadius:3}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
+  createOrUpdate('chartGrowth',{type:'line',data:{labels,datasets:[{label:'Gross Revenue %',data:gR,borderColor:'#1a0a2e',borderWidth:2,backgroundColor:'rgba(26,10,46,0.35)',fill:true,tension:0.3,pointRadius:3,datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>v?v.toFixed(1)+'%':''}},{label:'Volume %',data:gV,borderColor:'#16a34a',borderWidth:2,tension:0.3,pointRadius:3,datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>v?v.toFixed(1)+'%':''}}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{ticks:{callback:v=>v.toFixed(0)+'%'}}}}});
 
   // MoM Rx Growth KPI — compute from the last 2 months with data
   const momEl = document.getElementById('k-mom');
@@ -948,17 +967,17 @@ function updateUnitHeaders() {
 
 function renderBreakdowns(data) {
   const brands=data.brands||[];
-  if(brands.length>0) createOrUpdate('chartBrand',{type:'bar',data:{labels:brands.map(b=>b.brand||'Unknown'),datasets:[{label:'Net Rev €',data:brands.map(b=>b.net_revenue_eur),backgroundColor:PALETTE.slice(0,brands.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  if(brands.length>0) createOrUpdate('chartBrand',{type:'bar',data:{labels:brands.map(b=>b.brand||'Unknown'),datasets:[{label:'Net Rev €',data:brands.map(b=>b.net_revenue_eur),backgroundColor:PALETTE.slice(0,brands.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},datalabels:{display:true,anchor:'end',align:'end',font:{size:9},color:'#1e293b',formatter:v=>fmtLabel(v)}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const cats=data.categories||[];
-  createOrUpdate('chartCat',{type:'doughnut',data:{labels:cats.map(c=>c.category||'Unknown'),datasets:[{data:cats.map(c=>c.net_revenue_eur),backgroundColor:PALETTE.slice(0,cats.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}}}});
+  createOrUpdate('chartCat',{type:'doughnut',data:{labels:cats.map(c=>c.category||'Unknown'),datasets:[{data:cats.map(c=>c.net_revenue_eur),backgroundColor:PALETTE.slice(0,cats.length),datalabels:{display:ctx=>{const total=ctx.dataset.data.reduce((a,b)=>a+b,0);return total>0&&(ctx.dataset.data[ctx.dataIndex]/total*100)>5;},color:'#fff',font:{size:11,weight:'bold'},formatter:(v,ctx)=>{const total=ctx.dataset.data.reduce((a,b)=>a+b,0);return total>0?(v/total*100).toFixed(1)+'%':'';}}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11},generateLabels:chart=>{const ds=chart.data.datasets[0];const total=ds.data.reduce((a,b)=>a+b,0);return chart.data.labels.map((label,i)=>{const pct=total>0?(ds.data[i]/total*100).toFixed(1):'0.0';return{text:label+' ('+pct+'%)',fillStyle:ds.backgroundColor[i],strokeStyle:ds.backgroundColor[i],hidden:!chart.getDataVisibility(i),index:i};});}}}}}});
   const ori=data.origins||[];
-  createOrUpdate('chartOrigin',{type:'bar',data:{labels:ori.map(o=>o.origin),datasets:[{label:'Net Rev €',data:ori.map(o=>o.net_revenue_eur),backgroundColor:PALETTE.slice(0,ori.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  createOrUpdate('chartOrigin',{type:'bar',data:{labels:ori.map(o=>o.origin),datasets:[{label:'Net Rev €',data:ori.map(o=>o.net_revenue_eur),backgroundColor:PALETTE.slice(0,ori.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},datalabels:{display:true,anchor:'end',align:'end',font:{size:9},color:'#1e293b',formatter:v=>fmtLabel(v)}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
   const pt=data.price_tiers||[];
   const ptU=getUnitLabel();
   const ptSpecific=hasSpecificCategory();
   const ptSuffix=(ptSpecific && ptU!=='units') ? '/'+ptU : '';
   const ptLabels=pt.map(p=>p.price_tier.replace(/\/g\b/g, ptSuffix));
-  createOrUpdate('chartPrice',{type:'bar',data:{labels:ptLabels,datasets:[{label:'Net Rev €',data:pt.map(p=>p.net_revenue_eur),backgroundColor:[COLORS.green,COLORS.blue,COLORS.teal,COLORS.purple,COLORS.orange]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{min:0,beginAtZero:true,ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
+  createOrUpdate('chartPrice',{type:'bar',data:{labels:ptLabels,datasets:[{label:'Net Rev €',data:pt.map(p=>p.net_revenue_eur),backgroundColor:[COLORS.green,COLORS.blue,COLORS.teal,COLORS.purple,COLORS.orange]}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>fmtLabel(v)}},scales:{y:{min:0,beginAtZero:true,ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
 }
 
 function renderPatients(data) {
@@ -968,12 +987,12 @@ function renderPatients(data) {
   const rd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='returning')||{}).patient_count||0);
   const newPatTotal=nd.reduce((a,b)=>a+b,0);
   document.getElementById('k-newpat').textContent=fmt(newPatTotal);
-  createOrUpdate('chartPatients',{type:'bar',data:{labels:periods.map(fmtDate),datasets:[{label:'New',data:nd,backgroundColor:'#1a0a2e',borderColor:'#1a0a2e',borderWidth:1,stack:'a'},{label:'Returning',data:rd,backgroundColor:'#0589D350',borderColor:'#0589D3',borderWidth:1,stack:'a'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true}}}});
+  createOrUpdate('chartPatients',{type:'bar',data:{labels:periods.map(fmtDate),datasets:[{label:'New',data:nd,backgroundColor:'#1a0a2e',borderColor:'#1a0a2e',borderWidth:1,stack:'a',datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>fmtLabelUnits(v)}},{label:'Returning',data:rd,backgroundColor:'#0589D350',borderColor:'#0589D3',borderWidth:1,stack:'a',datalabels:{display:false}}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true}}}});
   const age=data.age_segments||[];
-  createOrUpdate('chartAge',{type:'bar',data:{labels:age.map(a=>a.age_segment),datasets:[{label:'Patients',data:age.map(a=>a.patient_count),backgroundColor:PALETTE.slice(0,age.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+  createOrUpdate('chartAge',{type:'bar',data:{labels:age.map(a=>a.age_segment),datasets:[{label:'Patients',data:age.map(a=>a.patient_count),backgroundColor:PALETTE.slice(0,age.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>fmtLabelUnits(v)}}}});
   const reg=(data.regions||[]).filter(r=>r.region && r.region.trim());
   populateSelect('filterRegion', reg.map(r=>r.region).filter(Boolean).sort(), 'All Regions');
-  if(reg.length>0) createOrUpdate('chartRegion',{type:'bar',data:{labels:reg.map(r=>r.region),datasets:[{label:'Patients',data:reg.map(r=>r.patient_count),backgroundColor:PALETTE.slice(0,reg.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+  if(reg.length>0) createOrUpdate('chartRegion',{type:'bar',data:{labels:reg.map(r=>r.region),datasets:[{label:'Patients',data:reg.map(r=>r.patient_count),backgroundColor:PALETTE.slice(0,reg.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>fmtLabelUnits(v)}},scales:{y:{beginAtZero:true}}}});
 }
 
 // ============================================================

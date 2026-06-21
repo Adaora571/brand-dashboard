@@ -465,20 +465,20 @@
         <div style="flex:1; background:#f0f9ff; border-radius:8px; padding:10px 12px; border-left:3px solid #0589D3;">
           <div style="font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; margin-bottom:6px;">New Customers</div>
           <div style="font-size:18px; font-weight:700; color:var(--text);" id="patNewCount">—</div>
-          <div style="font-size:11px; color:var(--muted); margin-top:2px;">patients</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">patients <span id="patNewCountChg"></span></div>
           <div style="margin-top:8px; font-size:13px; font-weight:600; color:var(--text);" id="patNewRevenue">—</div>
           <div style="font-size:11px; color:var(--muted);" id="patNewRevPct">revenue</div>
           <div style="margin-top:4px; font-size:12px; font-weight:600; color:var(--text);" id="patNewOrders">—</div>
-          <div style="font-size:11px; color:var(--muted);">orders</div>
+          <div style="font-size:11px; color:var(--muted);">orders <span id="patNewOrdChg"></span></div>
         </div>
         <div style="flex:1; background:#f0fdf4; border-radius:8px; padding:10px 12px; border-left:3px solid #13375E;">
           <div style="font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; margin-bottom:6px;">Returning Customers</div>
           <div style="font-size:18px; font-weight:700; color:var(--text);" id="patRetCount">—</div>
-          <div style="font-size:11px; color:var(--muted); margin-top:2px;">patients</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">patients <span id="patRetCountChg"></span></div>
           <div style="margin-top:8px; font-size:13px; font-weight:600; color:var(--text);" id="patRetRevenue">—</div>
           <div style="font-size:11px; color:var(--muted);" id="patRetRevPct">revenue</div>
           <div style="margin-top:4px; font-size:12px; font-weight:600; color:var(--text);" id="patRetOrders">—</div>
-          <div style="font-size:11px; color:var(--muted);">orders</div>
+          <div style="font-size:11px; color:var(--muted);">orders <span id="patRetOrdChg"></span></div>
         </div>
       </div>
     </div>
@@ -1106,6 +1106,26 @@ function renderCategoryChart() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            font: { size: 11 },
+            generateLabels: function(chart) {
+              const data = chart.data;
+              const total = data.datasets[0].data.reduce((a, b) => a + b, 0);
+              return data.labels.map((label, i) => {
+                const value = data.datasets[0].data[i];
+                const pct = total ? (value / total * 100).toFixed(1) : '0.0';
+                return {
+                  text: label + ' (' + pct + '%)',
+                  fillStyle: data.datasets[0].backgroundColor[i % data.datasets[0].backgroundColor.length],
+                  hidden: !chart.getDataVisibility(i),
+                  index: i,
+                };
+              });
+            }
+          }
+        },
         datalabels: {
           display: function(context) {
             const val = context.dataset.data[context.dataIndex];
@@ -1207,6 +1227,16 @@ function renderPatientCharts() {
   if (allData.patient_region) renderRegionChart();
 }
 
+function patChgArrow(curr, prev) {
+  if (!prev || !curr) return '';
+  const pct = ((curr - prev) / prev * 100).toFixed(1);
+  if (pct >= 0) {
+    return '<span style="color:#16a34a;font-size:11px;font-weight:600;">▲ ' + pct + '%</span>';
+  } else {
+    return '<span style="color:#dc2626;font-size:11px;font-weight:600;">▼ ' + Math.abs(pct) + '%</span>';
+  }
+}
+
 function renderPatientChart() {
   const data = allData.patient_new_returning || [];
   const ctx = document.getElementById('chartPatients').getContext('2d');
@@ -1226,6 +1256,26 @@ function renderPatientChart() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            font: { size: 11 },
+            generateLabels: function(chart) {
+              const data = chart.data;
+              const total = data.datasets[0].data.reduce((a, b) => a + b, 0);
+              return data.labels.map((label, i) => {
+                const value = data.datasets[0].data[i];
+                const pct = total ? (value / total * 100).toFixed(1) : '0.0';
+                return {
+                  text: label + ' (' + pct + '%)',
+                  fillStyle: data.datasets[0].backgroundColor[i],
+                  hidden: !chart.getDataVisibility(i),
+                  index: i,
+                };
+              });
+            }
+          }
+        },
         datalabels: {
           display: function(context) {
             const val = context.dataset.data[context.dataIndex];
@@ -1250,17 +1300,25 @@ function renderPatientChart() {
 
   document.getElementById('patNewCount').textContent = formatNum(newRow.count);
   document.getElementById('patNewRevenue').textContent = fmtLabel(newRow.revenue || 0);
-  document.getElementById('patNewRevPct').textContent = totalRevenue > 0
-    ? 'revenue (' + ((newRow.revenue || 0) / totalRevenue * 100).toFixed(1) + '%)'
+  document.getElementById('patNewRevPct').innerHTML = totalRevenue > 0
+    ? 'revenue (' + ((newRow.revenue || 0) / totalRevenue * 100).toFixed(1) + '%) ' + patChgArrow(newRow.revenue, newRow.prev_revenue)
     : 'revenue';
   document.getElementById('patNewOrders').textContent = formatNum(newRow.orders || 0);
 
+  // Comparison arrows for New Customers
+  document.getElementById('patNewCountChg').innerHTML = patChgArrow(newRow.count, newRow.prev_count);
+  document.getElementById('patNewOrdChg').innerHTML = patChgArrow(newRow.orders, newRow.prev_orders);
+
   document.getElementById('patRetCount').textContent = formatNum(retRow.count);
   document.getElementById('patRetRevenue').textContent = fmtLabel(retRow.revenue || 0);
-  document.getElementById('patRetRevPct').textContent = totalRevenue > 0
-    ? 'revenue (' + ((retRow.revenue || 0) / totalRevenue * 100).toFixed(1) + '%)'
+  document.getElementById('patRetRevPct').innerHTML = totalRevenue > 0
+    ? 'revenue (' + ((retRow.revenue || 0) / totalRevenue * 100).toFixed(1) + '%) ' + patChgArrow(retRow.revenue, retRow.prev_revenue)
     : 'revenue';
   document.getElementById('patRetOrders').textContent = formatNum(retRow.orders || 0);
+
+  // Comparison arrows for Returning Customers
+  document.getElementById('patRetCountChg').innerHTML = patChgArrow(retRow.count, retRow.prev_count);
+  document.getElementById('patRetOrdChg').innerHTML = patChgArrow(retRow.orders, retRow.prev_orders);
 
   summaryEl.style.display = 'block';
 }
