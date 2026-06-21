@@ -365,6 +365,28 @@ MANUFACTURER_FEES = {
         "notes": "Pending contract finalisation",
     },
 }
+
+# ============================================================
+# ★ QUARTERLY VOLUME TARGETS (kg) — Easy to update each quarter
+# Keys are "YYYY-QN" (e.g. "2026-Q1"). Values map slug → target_kg.
+# Only brands with targets need entries; missing = no target.
+# ============================================================
+QUARTERLY_TARGETS = {
+    "2026-Q1": {
+        "four20": 330, "sanitygroup": 330, "demecan": 180, "cannamedical": 160,
+        "aurora": 135, "enua": 100, "alephsana": 60, "iuvo": 30,
+    },
+    "2026-Q2": {
+        "four20": 350, "sanitygroup": 350, "demecan": 180, "cannamedical": 160,
+        "aurora": 115, "enua": 170, "alephsana": 55, "novacana": 60,
+        "cantourage": 60, "montu": 50,
+    },
+    "2026-Q3": {
+        "four20": 350, "sanitygroup": 350, "demecan": 180, "cannamedical": 160,
+        "aurora": 115, "enua": 170, "novacana": 180, "cantourage": 60,
+        "montu": 50,
+    },
+}
 # ============================================================
 
 def verify_password(slug: str, password: str) -> bool:
@@ -465,6 +487,15 @@ async def run_query_async(sql: str, params: list = None):
     return await asyncio.to_thread(run_query, sql, params)
 
 
+# Remap product_vertical for new categories not yet tagged in BQ.
+# Products with "Kapseln"/"Kapsel" in the name → 'capsule', "Spray" → 'spray'.
+CATEGORY_EXPR = """CASE
+  WHEN LOWER(oi.product_name) LIKE '%kapseln%' OR LOWER(oi.product_name) LIKE '%kapsel%' THEN 'capsule'
+  WHEN LOWER(oi.product_name) LIKE '%spray%' THEN 'spray'
+  ELSE oi.product_vertical
+END"""
+
+
 def date_params(start_date: str, end_date: str, category: str = ""):
     """Build date + category filter SQL + params."""
     clauses, params = [], []
@@ -475,7 +506,7 @@ def date_params(start_date: str, end_date: str, category: str = ""):
         clauses.append("DATE(o.created_at) <= @end_date")
         params.append(bigquery.ScalarQueryParameter("end_date", "DATE", end_date))
     if category:
-        clauses.append("oi.product_vertical = @category")
+        clauses.append(f"({CATEGORY_EXPR}) = @category")
         params.append(bigquery.ScalarQueryParameter("category", "STRING", category))
     where = (" AND " + " AND ".join(clauses)) if clauses else ""
     return where, params
@@ -644,7 +675,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
         AND {compare_clause}
-        {"AND oi.product_vertical = @category" if category else ""}
+        {f"AND ({CATEGORY_EXPR}) = @category" if category else ""}
     )
     SELECT
       c.*, p.prescriptions AS prev_rx, p.revenue_eur AS prev_rev,
@@ -784,7 +815,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
         extra_where += " AND oi.product_brand_name = @brand"
         extra_params.append(bigquery.ScalarQueryParameter("brand", "STRING", brand))
     if category:
-        extra_where += " AND oi.product_vertical = @category"
+        extra_where += f" AND ({CATEGORY_EXPR}) = @category"
         extra_params.append(bigquery.ScalarQueryParameter("category", "STRING", category))
     if origin:
         extra_where += " AND oi.product_country_or_origin = @origin"
@@ -794,7 +825,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     SELECT
       oi.product_name,
       oi.product_brand_name,
-      oi.product_vertical AS category,
+      ({CATEGORY_EXPR}) AS category,
       oi.product_country_or_origin AS origin,
       COUNT(DISTINCT o.order_id) AS prescriptions,
       SUM(oi.quantity_after_cancellations) AS volume_g,
@@ -841,7 +872,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     base_params = mfg_p + date_p
 
     cat_sql = f"""
-    SELECT oi.product_vertical AS category,
+    SELECT ({CATEGORY_EXPR}) AS category,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
@@ -948,13 +979,17 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
-        {"AND oi.product_vertical = @category" if category else ""}
+        {f"AND ({CATEGORY_EXPR}) = @category" if category else ""}
       GROUP BY 1
     )
     SELECT
       FORMAT_DATE('%Y-%m', DATE(o.created_at)) AS period,
       IF(DATE(o.created_at) = f.first_date, 'new', 'returning') AS patient_type,
-      COUNT(DISTINCT o.customer_id) AS patient_count
+      COUNT(DISTINCT o.customer_id) AS patient_count,
+      COUNT(DISTINCT o.order_id) AS order_count,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
+       - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
+       - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     JOIN first_order f ON o.customer_id = f.customer_id
@@ -1053,7 +1088,7 @@ async def _get_categories(mfg_name: str):
     """Internal helper for categories query, used by both brand and recon APIs."""
     mfg_where, mfg_p = mfg_clause(mfg_name)
     sql = f"""
-    SELECT DISTINCT oi.product_vertical AS category
+    SELECT DISTINCT ({CATEGORY_EXPR}) AS category
     FROM `{PROJECT_DATASET}.order_items` oi
     WHERE {mfg_where}
       AND oi.product_vertical IS NOT NULL
@@ -1082,7 +1117,7 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
     if cached:
         return cached
 
-    cat_filter = "AND oi.product_vertical = @category" if category else ""
+    cat_filter = f"AND ({CATEGORY_EXPR}) = @category" if category else ""
     sql = f"""
     SELECT COUNT(DISTINCT o.order_id) AS total_rx
     FROM `{PROJECT_DATASET}.order_items` oi
@@ -1122,6 +1157,7 @@ async def recon_page(request: Request):
         "brands": {slug: {"name": get_display_name(slug), "hash": f"{BRAND_HASHES[slug]}-{slug}"}
                    for slug in MANUFACTURER_BQ_NAMES if slug not in DASHBOARD_ONLY_BRANDS},
         "fees": MANUFACTURER_FEES,
+        "quarterly_targets": QUARTERLY_TARGETS,
     })
 
 
@@ -1232,7 +1268,20 @@ async def api_recon_combined(
     pt_out = [{"tier": r["price_tier"], "volume": r.get("net_revenue_eur", 0)} for r in breakdowns.get("price_tiers", [])]
     ppo_out = [{"num_products": r["products_per_order"], "count": r.get("order_count", 0)} for r in breakdowns.get("products_per_order", [])]
     brand_out = [{"brand": r["brand"], "prescriptions": r.get("prescriptions", 0), "net_revenue_eur": r.get("net_revenue_eur", 0)} for r in breakdowns.get("brands", [])]
-    mfr_out = [{"manufacturer": r["manufacturer"], "volume_units": r.get("volume_units", 0), "net_revenue_eur": r.get("net_revenue_eur", 0)} for r in breakdowns.get("manufacturers", [])]
+    # Build reverse lookup: BQ manufacturer name → slug (for target matching)
+    bq_to_slug = {}
+    for s, bqn in MANUFACTURER_BQ_NAMES.items():
+        if isinstance(bqn, str):
+            bq_to_slug[bqn] = s
+        elif isinstance(bqn, list):
+            for n in bqn:
+                bq_to_slug[n] = s
+    mfr_out = [{
+        "manufacturer": r["manufacturer"],
+        "slug": bq_to_slug.get(r["manufacturer"], ""),
+        "volume_units": r.get("volume_units", 0),
+        "net_revenue_eur": r.get("net_revenue_eur", 0),
+    } for r in breakdowns.get("manufacturers", [])]
 
     # Map products
     prod_data = products.get("data", [])
@@ -1251,10 +1300,17 @@ async def api_recon_combined(
 
     # Map patients
     nr = patients.get("new_returning", [])
-    # Aggregate new/returning across all periods
+    # Aggregate new/returning across all periods (counts + revenue + orders)
     new_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "new")
     ret_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "returning")
-    pat_nr = [{"status": "New", "count": new_total}, {"status": "Returning", "count": ret_total}]
+    new_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr if r.get("patient_type") == "new")
+    ret_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr if r.get("patient_type") == "returning")
+    new_orders = sum(r.get("order_count", 0) for r in nr if r.get("patient_type") == "new")
+    ret_orders = sum(r.get("order_count", 0) for r in nr if r.get("patient_type") == "returning")
+    pat_nr = [
+        {"status": "New", "count": new_total, "revenue": new_rev, "orders": new_orders},
+        {"status": "Returning", "count": ret_total, "revenue": ret_rev, "orders": ret_orders},
+    ]
     pat_age = [{"age_segment": r["age_segment"], "count": r.get("patient_count", 0)} for r in patients.get("age_segments", [])]
     pat_reg = [{"region": r["region"], "count": r.get("patient_count", 0)} for r in patients.get("regions", [])]
 

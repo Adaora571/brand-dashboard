@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NordLeaf — Reconciliation Dashboard</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
 <style>
   :root {
     --primary: #1a0a2e; --accent: #0589D3; --navy: #2d1650;
@@ -370,6 +371,8 @@
         <th class="r" style="cursor:pointer;" onclick="sortMfrTable('volume_units')">Net Units Sold ▼</th>
         <th class="r" style="cursor:pointer;" onclick="sortMfrTable('net_revenue_eur')">Net Revenue € ▼</th>
         <th class="r">% of Total Revenue</th>
+        <th class="r" style="cursor:pointer;" onclick="sortMfrTable('_target_kg')">Q Target (kg) ▼</th>
+        <th class="r" style="cursor:pointer;" onclick="sortMfrTable('_pct_achieved')">% Achieved ▼</th>
       </tr>
     </thead>
     <tbody id="mfrBody"></tbody>
@@ -456,7 +459,30 @@
 <!-- SECTION 6: PATIENT INSIGHTS -->
 <div class="section-title"><span class="num">6</span> Patient Insights</div>
 <div class="grid grid-3">
-  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box"><canvas id="chartPatients"></canvas></div></div>
+  <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box" style="height:200px;"><canvas id="chartPatients"></canvas></div>
+    <div id="patNRSummary" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+      <div style="display:flex; gap:12px;">
+        <div style="flex:1; background:#f0f9ff; border-radius:8px; padding:10px 12px; border-left:3px solid #0589D3;">
+          <div style="font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; margin-bottom:6px;">New Customers</div>
+          <div style="font-size:18px; font-weight:700; color:var(--text);" id="patNewCount">—</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">patients</div>
+          <div style="margin-top:8px; font-size:13px; font-weight:600; color:var(--text);" id="patNewRevenue">—</div>
+          <div style="font-size:11px; color:var(--muted);" id="patNewRevPct">revenue</div>
+          <div style="margin-top:4px; font-size:12px; font-weight:600; color:var(--text);" id="patNewOrders">—</div>
+          <div style="font-size:11px; color:var(--muted);">orders</div>
+        </div>
+        <div style="flex:1; background:#f0fdf4; border-radius:8px; padding:10px 12px; border-left:3px solid #13375E;">
+          <div style="font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; margin-bottom:6px;">Returning Customers</div>
+          <div style="font-size:18px; font-weight:700; color:var(--text);" id="patRetCount">—</div>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">patients</div>
+          <div style="margin-top:8px; font-size:13px; font-weight:600; color:var(--text);" id="patRetRevenue">—</div>
+          <div style="font-size:11px; color:var(--muted);" id="patRetRevPct">revenue</div>
+          <div style="margin-top:4px; font-size:12px; font-weight:600; color:var(--text);" id="patRetOrders">—</div>
+          <div style="font-size:11px; color:var(--muted);">orders</div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Age Segments</div><div class="chart-box"><canvas id="chartAge"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">By Region <span style="font-weight:400;color:var(--muted);font-size:11px;">(Unique Patients)</span></div><div class="chart-box"><canvas id="chartRegion"></canvas></div></div>
 </div>
@@ -499,6 +525,26 @@
 </div>
 
 <script>
+// Register datalabels plugin and set global default to disabled
+Chart.register(ChartDataLabels);
+Chart.defaults.plugins.datalabels = { display: false };
+
+// Data label formatting helpers
+function fmtLabel(v) {
+  if (v === null || v === undefined) return '';
+  const abs = Math.abs(v);
+  if (abs >= 1000000) return '€' + (v/1000000).toFixed(1) + 'M';
+  if (abs >= 1000) return '€' + (v/1000).toFixed(0) + 'k';
+  return '€' + v.toFixed(0);
+}
+function fmtLabelUnits(v) {
+  if (v === null || v === undefined) return '';
+  const abs = Math.abs(v);
+  if (abs >= 1000000) return (v/1000000).toFixed(1) + 'M';
+  if (abs >= 1000) return (v/1000).toFixed(0) + 'k';
+  return v.toFixed(0);
+}
+
 // Nordleaf color palette
 const COLORS = {
   blue: '#0589D3', teal: '#13375E', green: '#16a34a', orange: '#ea580c',
@@ -513,6 +559,49 @@ const PALETTE = [
 // Template data
 const BRANDS_DATA = {{ brands | tojson }};
 const FEES_DATA = {{ fees | tojson }};
+const QUARTERLY_TARGETS = {{ quarterly_targets | tojson }};
+
+function getProRatedTarget(slug, startStr, endStr) {
+  if (!startStr || !endStr) return null;
+  const start = new Date(startStr);
+  const end = new Date(endStr);
+  let totalTarget = 0;
+
+  // Iterate over each quarter that the range might touch
+  const year = start.getFullYear();
+  const quarters = [
+    {key: `${year}-Q1`, start: new Date(year, 0, 1), end: new Date(year, 2, 31)},
+    {key: `${year}-Q2`, start: new Date(year, 3, 1), end: new Date(year, 5, 30)},
+    {key: `${year}-Q3`, start: new Date(year, 6, 1), end: new Date(year, 8, 30)},
+    {key: `${year}-Q4`, start: new Date(year, 9, 1), end: new Date(year, 11, 31)},
+  ];
+  // Also check next year if range spans year boundary
+  const year2 = end.getFullYear();
+  if (year2 > year) {
+    quarters.push(
+      {key: `${year2}-Q1`, start: new Date(year2, 0, 1), end: new Date(year2, 2, 31)},
+      {key: `${year2}-Q2`, start: new Date(year2, 3, 1), end: new Date(year2, 5, 30)},
+      {key: `${year2}-Q3`, start: new Date(year2, 6, 1), end: new Date(year2, 8, 30)},
+      {key: `${year2}-Q4`, start: new Date(year2, 9, 1), end: new Date(year2, 11, 31)},
+    );
+  }
+
+  for (const q of quarters) {
+    const targets = QUARTERLY_TARGETS[q.key];
+    if (!targets || !(slug in targets)) continue;
+
+    // Calculate overlap between selected range and quarter
+    const overlapStart = new Date(Math.max(start, q.start));
+    const overlapEnd = new Date(Math.min(end, q.end));
+    if (overlapStart > overlapEnd) continue;
+
+    const overlapDays = (overlapEnd - overlapStart) / 86400000 + 1;
+    const quarterDays = (q.end - q.start) / 86400000 + 1;
+    totalTarget += targets[slug] * (overlapDays / quarterDays);
+  }
+
+  return totalTarget > 0 ? totalTarget : null;
+}
 
 // State
 let selectedBrandSlug = 'all';
@@ -805,6 +894,14 @@ function renderTrendChart() {
           data: trend.map(x => x.revenue),
           backgroundColor: trend.map((_, i) => PALETTE[i % PALETTE.length]),
           yAxisID: 'y',
+          datalabels: {
+            display: true,
+            anchor: 'end',
+            align: 'top',
+            font: { size: 9, weight: '600' },
+            color: '#1e293b',
+            formatter: v => fmtLabel(v),
+          },
         },
         {
           label: 'Volume (Units)',
@@ -816,6 +913,7 @@ function renderTrendChart() {
           fill: false,
           tension: 0.3,
           pointBackgroundColor: '#13375E',
+          datalabels: { display: false },
         }
       ]
     },
@@ -853,6 +951,16 @@ function renderGrowthChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      plugins: {
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'top',
+          font: { size: 9 },
+          color: '#1e293b',
+          formatter: v => (v === null || v === undefined) ? '' : v.toFixed(1) + '%',
+        }
+      },
       scales: { y: { ticks: { callback: v => v.toFixed(1) + '%' } } }
     }
   });
@@ -880,6 +988,16 @@ function renderFeeChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      plugins: {
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'top',
+          font: { size: 9 },
+          color: '#1e293b',
+          formatter: v => fmtLabel(v),
+        }
+      },
       scales: { y: { beginAtZero: true, ticks: { callback: v => '€' + v.toLocaleString() } } }
     }
   });
@@ -944,6 +1062,14 @@ function renderTop5ProductChart() {
               return '€' + val.toLocaleString('de-DE', {minimumFractionDigits:2, maximumFractionDigits:2}) + '  (' + pct + '%)';
             }
           }
+        },
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'end',
+          font: { size: 9, weight: '600' },
+          color: '#1e293b',
+          formatter: v => fmtLabel(v),
         }
       },
       scales: {
@@ -966,6 +1092,7 @@ function renderCategoryChart() {
   const ctx = document.getElementById('chartCat').getContext('2d');
   if (charts.cat) charts.cat.destroy();
 
+  const catTotal = cat.reduce((s, x) => s + x.revenue, 0);
   charts.cat = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -975,7 +1102,24 @@ function renderCategoryChart() {
         backgroundColor: PALETTE,
       }]
     },
-    options: { responsive: true, maintainAspectRatio: false }
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        datalabels: {
+          display: function(context) {
+            const val = context.dataset.data[context.dataIndex];
+            return catTotal > 0 && (val / catTotal * 100) > 5;
+          },
+          color: '#fff',
+          font: { size: 11, weight: 'bold' },
+          formatter: function(value) {
+            const pct = catTotal > 0 ? (value / catTotal * 100).toFixed(1) : 0;
+            return pct + '%';
+          },
+        }
+      }
+    }
   });
 }
 
@@ -1008,7 +1152,17 @@ function renderPriceTierChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'top',
+          font: { size: 9, weight: '600' },
+          color: '#1e293b',
+          formatter: v => fmtLabel(v),
+        }
+      },
       scales: { y: { beginAtZero: true, ticks: { callback: v => '€' + fmtAxisVolume(v) } } }
     }
   });
@@ -1032,6 +1186,16 @@ function renderPPOChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      plugins: {
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'top',
+          font: { size: 9, weight: '600' },
+          color: '#1e293b',
+          formatter: v => fmtLabelUnits(v),
+        }
+      },
       scales: { y: { beginAtZero: true, ticks: { callback: v => v.toLocaleString() } } }
     }
   });
@@ -1048,6 +1212,7 @@ function renderPatientChart() {
   const ctx = document.getElementById('chartPatients').getContext('2d');
   if (charts.patients) charts.patients.destroy();
 
+  const patientTotal = data.reduce((s, x) => s + x.count, 0);
   charts.patients = new Chart(ctx, {
     type: 'doughnut',
     data: {
@@ -1057,8 +1222,47 @@ function renderPatientChart() {
         backgroundColor: [COLORS.blue, COLORS.teal],
       }]
     },
-    options: { responsive: true, maintainAspectRatio: false }
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        datalabels: {
+          display: function(context) {
+            const val = context.dataset.data[context.dataIndex];
+            return patientTotal > 0 && (val / patientTotal * 100) > 5;
+          },
+          color: '#fff',
+          font: { size: 11, weight: 'bold' },
+          formatter: function(value) {
+            const pct = patientTotal > 0 ? (value / patientTotal * 100).toFixed(1) : 0;
+            return pct + '%';
+          },
+        }
+      }
+    }
   });
+
+  // Populate new/returning summary cards with revenue and orders
+  const summaryEl = document.getElementById('patNRSummary');
+  const newRow = data.find(x => x.status === 'New') || { count: 0, revenue: 0, orders: 0 };
+  const retRow = data.find(x => x.status === 'Returning') || { count: 0, revenue: 0, orders: 0 };
+  const totalRevenue = (newRow.revenue || 0) + (retRow.revenue || 0);
+
+  document.getElementById('patNewCount').textContent = formatNum(newRow.count);
+  document.getElementById('patNewRevenue').textContent = fmtLabel(newRow.revenue || 0);
+  document.getElementById('patNewRevPct').textContent = totalRevenue > 0
+    ? 'revenue (' + ((newRow.revenue || 0) / totalRevenue * 100).toFixed(1) + '%)'
+    : 'revenue';
+  document.getElementById('patNewOrders').textContent = formatNum(newRow.orders || 0);
+
+  document.getElementById('patRetCount').textContent = formatNum(retRow.count);
+  document.getElementById('patRetRevenue').textContent = fmtLabel(retRow.revenue || 0);
+  document.getElementById('patRetRevPct').textContent = totalRevenue > 0
+    ? 'revenue (' + ((retRow.revenue || 0) / totalRevenue * 100).toFixed(1) + '%)'
+    : 'revenue';
+  document.getElementById('patRetOrders').textContent = formatNum(retRow.orders || 0);
+
+  summaryEl.style.display = 'block';
 }
 
 function renderAgeChart() {
@@ -1079,6 +1283,16 @@ function renderAgeChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      plugins: {
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'top',
+          font: { size: 9, weight: '600' },
+          color: '#1e293b',
+          formatter: v => fmtLabelUnits(v),
+        }
+      },
       scales: { y: { beginAtZero: true } }
     }
   });
@@ -1102,7 +1316,17 @@ function renderRegionChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          display: true,
+          anchor: 'end',
+          align: 'top',
+          font: { size: 9, weight: '600' },
+          color: '#1e293b',
+          formatter: v => fmtLabelUnits(v),
+        }
+      },
       scales: { y: { beginAtZero: true } }
     }
   });
@@ -1119,26 +1343,80 @@ function renderManufacturerTable() {
   const mfrs = allData.manufacturers || [];
   if (!mfrs.length) return;
 
-  const sorted = [...mfrs].sort((a, b) => {
+  const startStr = document.getElementById('startDate').value;
+  const endStr = document.getElementById('endDate').value;
+
+  // Enrich rows with computed target fields for sorting
+  const enriched = mfrs.map(r => {
+    const target = r.slug ? getProRatedTarget(r.slug, startStr, endStr) : null;
+    const volumeKg = (r.volume_units || 0) / 1000;
+    const pctAchieved = target ? (volumeKg / target * 100) : null;
+    return { ...r, _target_kg: target, _pct_achieved: pctAchieved };
+  });
+
+  const sorted = [...enriched].sort((a, b) => {
     const va = a[mfrSortCol] ?? '';
     const vb = b[mfrSortCol] ?? '';
+    // Treat nulls as -Infinity for numeric sorts so they go to the end
+    if (mfrSortCol === '_target_kg' || mfrSortCol === '_pct_achieved') {
+      const na = va === '' || va === null ? -Infinity : va;
+      const nb = vb === '' || vb === null ? -Infinity : vb;
+      return mfrSortAsc ? na - nb : nb - na;
+    }
     if (typeof va === 'string') return mfrSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
     return mfrSortAsc ? va - vb : vb - va;
   });
 
   const totalRev = sorted.reduce((s, r) => s + (r.net_revenue_eur || 0), 0);
   const totalVol = sorted.reduce((s, r) => s + (r.volume_units || 0), 0);
+  let totalTargetKg = 0;
+  let hasAnyTarget = false;
 
   const tbody = document.getElementById('mfrBody');
   tbody.innerHTML = sorted.map(r => {
     const pct = totalRev ? (r.net_revenue_eur / totalRev * 100).toFixed(1) : '0.0';
+    const target = r._target_kg;
+    const volumeKg = (r.volume_units || 0) / 1000;
+    let targetCell, achievedCell;
+
+    if (target !== null) {
+      hasAnyTarget = true;
+      totalTargetKg += target;
+      const pctAchieved = (volumeKg / target * 100);
+      let achievedColor;
+      if (pctAchieved >= 100) achievedColor = 'var(--green)';
+      else if (pctAchieved >= 70) achievedColor = 'var(--orange)';
+      else achievedColor = 'var(--red)';
+      targetCell = Math.round(target).toLocaleString('en-US') + ' kg';
+      achievedCell = `<span style="color:${achievedColor};font-weight:600;">${pctAchieved.toFixed(1)}%</span>`;
+    } else {
+      targetCell = '—';
+      achievedCell = '—';
+    }
+
     return `<tr>
       <td style="font-weight:600;">${r.manufacturer}</td>
       <td class="r">${Math.round(r.volume_units || 0).toLocaleString('en-US')}</td>
       <td class="r">€${Math.round(r.net_revenue_eur || 0).toLocaleString('en-US')}</td>
       <td class="r">${pct}%</td>
+      <td class="r">${targetCell}</td>
+      <td class="r">${achievedCell}</td>
     </tr>`;
   }).join('');
+
+  // Footer totals
+  let footTargetCell = '—';
+  let footAchievedCell = '—';
+  if (hasAnyTarget && totalTargetKg > 0) {
+    const totalVolKg = totalVol / 1000;
+    const totalPctAchieved = (totalVolKg / totalTargetKg * 100);
+    let achievedColor;
+    if (totalPctAchieved >= 100) achievedColor = 'var(--green)';
+    else if (totalPctAchieved >= 70) achievedColor = 'var(--orange)';
+    else achievedColor = 'var(--red)';
+    footTargetCell = Math.round(totalTargetKg).toLocaleString('en-US') + ' kg';
+    footAchievedCell = `<span style="color:${achievedColor};font-weight:600;">${totalPctAchieved.toFixed(1)}%</span>`;
+  }
 
   const tfoot = document.getElementById('mfrFoot');
   tfoot.innerHTML = `<tr>
@@ -1146,6 +1424,8 @@ function renderManufacturerTable() {
     <td class="r" style="font-weight:700;">${Math.round(totalVol).toLocaleString('en-US')}</td>
     <td class="r" style="font-weight:700;">€${Math.round(totalRev).toLocaleString('en-US')}</td>
     <td class="r" style="font-weight:700;">100%</td>
+    <td class="r" style="font-weight:700;">${footTargetCell}</td>
+    <td class="r" style="font-weight:700;">${footAchievedCell}</td>
   </tr>`;
 }
 
