@@ -229,7 +229,7 @@ MANUFACTURER_PASSWORD_SET = {
 # (e.g. company rebranding where old data still uses the old name).
 MANUFACTURER_BQ_NAMES = {
     "cannamedical":  "Cannamedical",
-    "four20":        "Four 20 Pharma",
+    "four20":        ["Four 20 Pharma", "Four 20 pharma"],
     "aurora":        "Aurora",
     "demecan":       "Demecan",
     "enua":          "enua",
@@ -1326,12 +1326,24 @@ async def api_recon_combined(
         elif isinstance(bqn, list):
             for n in bqn:
                 bq_to_slug[n] = s
-    mfr_out = [{
-        "manufacturer": r["manufacturer"],
-        "slug": bq_to_slug.get(r["manufacturer"], ""),
-        "volume_units": r.get("volume_units", 0),
-        "net_revenue_eur": r.get("net_revenue_eur", 0),
-    } for r in breakdowns.get("manufacturers", [])]
+    # Merge manufacturer rows that map to the same slug (e.g. "Four 20 Pharma" + "Four 20 pharma")
+    _mfr_merged = {}
+    for r in breakdowns.get("manufacturers", []):
+        slug = bq_to_slug.get(r["manufacturer"], "")
+        key = slug or r["manufacturer"]  # group by slug if mapped, else by raw name
+        if key in _mfr_merged:
+            _mfr_merged[key]["volume_units"] += r.get("volume_units", 0) or 0
+            _mfr_merged[key]["net_revenue_eur"] += r.get("net_revenue_eur", 0) or 0
+        else:
+            # Use the brand config display name if available, else the first BQ name seen
+            display_name = BRAND_CONFIG.get(slug, {}).get("name", r["manufacturer"]) if slug else r["manufacturer"]
+            _mfr_merged[key] = {
+                "manufacturer": display_name,
+                "slug": slug,
+                "volume_units": r.get("volume_units", 0) or 0,
+                "net_revenue_eur": r.get("net_revenue_eur", 0) or 0,
+            }
+    mfr_out = list(_mfr_merged.values())
 
     # Map products
     prod_data = products.get("data", [])
