@@ -250,7 +250,8 @@
           <button class="preset-btn" data-preset="last12m" onclick="selectPreset(this)">Last 12 months</button>
           <button class="preset-btn" data-preset="lastmonth" onclick="selectPreset(this)">Last Month</button>
           <button class="preset-btn" data-preset="mtd" onclick="selectPreset(this)">Month to date</button>
-          <button class="preset-btn active" data-preset="ytd" onclick="selectPreset(this)">Year to date</button>
+          <button class="preset-btn active" data-preset="qtd" onclick="selectPreset(this)">Quarter to date</button>
+          <button class="preset-btn" data-preset="ytd" onclick="selectPreset(this)">Year to date</button>
           <button class="preset-btn" data-preset="custom" onclick="selectPreset(this)">Custom</button>
         </div>
         <div class="date-custom">
@@ -304,10 +305,10 @@
   <div class="card kpi-card accent-orange"><div class="label">Market Share (Rx)</div><div class="value" id="k-mshare">—</div><div class="kpi-desc">% of total platform prescriptions</div></div>
 </div>
 <div class="grid grid-6" style="margin-top:16px;">
-  <div class="card kpi-card accent-red"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="kpi-desc">Unique customers</div></div>
-  <div class="card kpi-card accent-green"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="kpi-desc">Net Rev / Volume</div></div>
-  <div class="card kpi-card accent-purple"><div class="label">Avg Order Value</div><div class="value" id="k-aov">—</div><div class="kpi-desc">Revenue / Orders</div></div>
-  <div class="card kpi-card accent-teal"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="kpi-desc">Patients w/ 2+ orders</div></div>
+  <div class="card kpi-card accent-red"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="change" id="k-pat-chg"></div><div class="kpi-desc">Unique customers</div></div>
+  <div class="card kpi-card accent-green"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="change" id="k-epg-chg"></div><div class="kpi-desc">Net Rev / Volume</div></div>
+  <div class="card kpi-card accent-purple"><div class="label">Avg Order Value</div><div class="value" id="k-aov">—</div><div class="change" id="k-aov-chg"></div><div class="kpi-desc">Revenue / Orders</div></div>
+  <div class="card kpi-card accent-teal"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="change" id="k-rpr-chg"></div><div class="kpi-desc">Patients w/ 2+ orders</div></div>
   <div class="card kpi-card accent-blue"><div class="label">Avg Products / Order</div><div class="value" id="k-ppo">—</div><div class="kpi-desc">Products per order</div></div>
   <div class="card kpi-card accent-red"><div class="label">Top 3 SKU Conc.</div><div class="value" id="k-sku3">—</div><div class="kpi-desc">% rev from top 3 products</div></div>
 </div>
@@ -659,11 +660,14 @@ async function initBrands() {
     sel.appendChild(opt);
   });
 
-  // Compute default comparison dates (prev period for YTD) before first load
+  // Compute default comparison dates (QTD) before first load
   const todayStr = isoDate(new Date());
-  document.getElementById('startDate').value = todayStr.slice(0,4) + '-01-01';
+  const todayDate = new Date();
+  const qMonth = Math.floor(todayDate.getMonth() / 3) * 3; // 0=Jan,3=Apr,6=Jul,9=Oct
+  const qStart = isoDate(new Date(todayDate.getFullYear(), qMonth, 1));
+  document.getElementById('startDate').value = qStart;
   document.getElementById('endDate').value = todayStr;
-  document.getElementById('dpFrom').value = todayStr.slice(0,4) + '-01-01';
+  document.getElementById('dpFrom').value = qStart;
   document.getElementById('dpTo').value = todayStr;
   const cmp = getCompareDates(document.getElementById('startDate').value, todayStr);
   document.getElementById('compareStart').value = cmp.start;
@@ -778,9 +782,13 @@ function renderKPIs() {
 
   document.getElementById('k-ppo').textContent = (kpi.ppo || 0).toFixed(1);
   document.getElementById('k-epg').textContent = formatCurr(kpi.epg || 0);
+  document.getElementById('k-epg-chg').innerHTML = formatChange(kpi.epg, kpiC.epg);
   document.getElementById('k-aov').textContent = formatCurr(kpi.aov || 0);
+  document.getElementById('k-aov-chg').innerHTML = formatChange(kpi.aov, kpiC.aov);
   document.getElementById('k-pat').textContent = formatNum(kpi.num_patients);
+  document.getElementById('k-pat-chg').innerHTML = formatChange(kpi.num_patients, kpiC.num_patients);
   document.getElementById('k-rpr').textContent = formatPct(kpi.repeat_rate);
+  document.getElementById('k-rpr-chg').innerHTML = formatChange(kpi.repeat_rate, kpiC.repeat_rate);
 
   // Dynamic unit labels based on category
   const u = getUnitLabel();
@@ -1806,7 +1814,7 @@ function sortColumn(table, colIndex, asc) {
 
 // Date picker functions
 // ── Date picker state ──
-let dpActivePreset = 'ytd';
+let dpActivePreset = 'qtd';
 let dpCompareOn = true;
 let dpCompareMode = 'prev';
 
@@ -1928,6 +1936,10 @@ function selectPreset(btn) {
     }
     case 'mtd': {
       from = _iso(today).slice(0,8) + '01'; break;
+    }
+    case 'qtd': {
+      const qm = Math.floor(today.getMonth() / 3) * 3;
+      from = _iso(new Date(today.getFullYear(), qm, 1)); break;
     }
     case 'ytd': {
       from = today.getFullYear() + '-01-01'; break;

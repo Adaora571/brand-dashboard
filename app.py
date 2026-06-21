@@ -670,18 +670,42 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         COUNT(DISTINCT o.order_id) AS prescriptions,
         SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
         SUM(oi.quantity_after_cancellations) AS sales_volume_g,
-        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
+        COUNT(DISTINCT o.customer_id) AS total_patients,
+        SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
+        SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
         AND {compare_clause}
         {f"AND ({CATEGORY_EXPR}) = @category" if category else ""}
+    ),
+    prev_repeat AS (
+      SELECT
+        SAFE_DIVIDE(COUNTIF(lifetime_orders >= 2), COUNT(*)) AS repeat_purchase_rate
+      FROM (
+        SELECT DISTINCT o.customer_id
+        FROM `{PROJECT_DATASET}.order_items` oi
+        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        WHERE {mfg_where} {NET_ORDER_FILTER}
+          AND {compare_clause}
+          {f"AND ({CATEGORY_EXPR}) = @category" if category else ""}
+      ) prev_customers
+      JOIN (
+        SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS lifetime_orders
+        FROM `{PROJECT_DATASET}.order_items` oi
+        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        WHERE {mfg_where} {NET_ORDER_FILTER}
+        GROUP BY 1
+      ) lifetime ON prev_customers.customer_id = lifetime.customer_id
     )
     SELECT
       c.*, p.prescriptions AS prev_rx, p.revenue_eur AS prev_rev,
       p.sales_volume_g AS prev_vol, p.net_revenue_eur AS prev_net,
-      rp.repeat_purchase_rate
-    FROM curr c, prev p, repeat_stats rp
+      p.total_patients AS prev_patients, p.avg_eur_per_g AS prev_epg,
+      p.avg_order_value AS prev_aov,
+      rp.repeat_purchase_rate, pr.repeat_purchase_rate AS prev_repeat_rate
+    FROM curr c, prev p, repeat_stats rp, prev_repeat pr
     """
 
     params = mfg_p + [
@@ -718,12 +742,20 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "revenue_eur": r.get("prev_rev"),
             "sales_volume_g": r.get("prev_vol"),
             "net_revenue_eur": r.get("prev_net"),
+            "total_patients": r.get("prev_patients"),
+            "avg_eur_per_g": r.get("prev_epg"),
+            "avg_order_value": r.get("prev_aov"),
+            "repeat_purchase_rate": r.get("prev_repeat_rate"),
         },
         "growth": {
             "prescriptions": safe_growth(r.get("prescriptions"), r.get("prev_rx")),
             "revenue": safe_growth(r.get("revenue_eur"), r.get("prev_rev")),
             "volume": safe_growth(r.get("sales_volume_g"), r.get("prev_vol")),
             "net_revenue": safe_growth(r.get("net_revenue_eur"), r.get("prev_net")),
+            "total_patients": safe_growth(r.get("total_patients"), r.get("prev_patients")),
+            "avg_eur_per_g": safe_growth(r.get("avg_eur_per_g"), r.get("prev_epg")),
+            "avg_order_value": safe_growth(r.get("avg_order_value"), r.get("prev_aov")),
+            "repeat_purchase_rate": safe_growth(r.get("repeat_purchase_rate"), r.get("prev_repeat_rate")),
         },
         "fee": {"amount": fee_amount},
     }
@@ -1252,6 +1284,10 @@ async def api_recon_combined(
         "revenue": prev_data.get("revenue_eur"),
         "volume": prev_data.get("sales_volume_g"),
         "net_revenue": prev_data.get("net_revenue_eur"),
+        "num_patients": prev_data.get("total_patients"),
+        "epg": prev_data.get("avg_eur_per_g"),
+        "aov": prev_data.get("avg_order_value"),
+        "repeat_rate": prev_data.get("repeat_purchase_rate"),
     }]
 
     # Map trends → trend + growth + fee_detail

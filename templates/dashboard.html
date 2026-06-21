@@ -270,7 +270,8 @@
           <button class="preset-btn" data-preset="last12m" onclick="selectPreset(this)">Last 12 months</button>
           <button class="preset-btn" data-preset="lastmonth" onclick="selectPreset(this)">Last Month</button>
           <button class="preset-btn" data-preset="mtd" onclick="selectPreset(this)">Month to date</button>
-          <button class="preset-btn active" data-preset="ytd" onclick="selectPreset(this)">Year to date</button>
+          <button class="preset-btn active" data-preset="qtd" onclick="selectPreset(this)">Quarter to date</button>
+          <button class="preset-btn" data-preset="ytd" onclick="selectPreset(this)">Year to date</button>
           <button class="preset-btn" data-preset="custom" onclick="selectPreset(this)">Custom</button>
         </div>
         <div class="date-custom">
@@ -1065,7 +1066,7 @@ async function loadCategories() {
 // ============================================================
 // SHOPIFY-STYLE DATE PICKER LOGIC
 // ============================================================
-let dpActivePreset = 'ytd';
+let dpActivePreset = 'qtd';
 let dpCompareOn = true;
 let dpCompareMode = 'prev';
 
@@ -1135,6 +1136,10 @@ function selectPreset(btn) {
     }
     case 'mtd':
       from = todayStr.slice(0,8) + '01'; break;
+    case 'qtd': {
+      const qm = Math.floor(today.getMonth() / 3) * 3;
+      from = isoDate(new Date(today.getFullYear(), qm, 1)); break;
+    }
     case 'ytd':
       from = todayStr.slice(0,4) + '-01-01'; break;
     case 'custom':
@@ -1261,15 +1266,17 @@ document.addEventListener('DOMContentLoaded', () => {
 // ============================================================
 
 window.addEventListener('DOMContentLoaded', async () => {
-  // Initialize date picker with YTD preset
+  // Initialize date picker with QTD preset
   const today = new Date();
   const todayStr = isoDate(today);
-  document.getElementById('startDate').value = todayStr.slice(0,4) + '-01-01';
+  const qMonth = Math.floor(today.getMonth() / 3) * 3;
+  const qStart = isoDate(new Date(today.getFullYear(), qMonth, 1));
+  document.getElementById('startDate').value = qStart;
   document.getElementById('endDate').value = todayStr;
-  document.getElementById('dpFrom').value = todayStr.slice(0,4) + '-01-01';
+  document.getElementById('dpFrom').value = qStart;
   document.getElementById('dpTo').value = todayStr;
 
-  // Compute default comparison (prev period for YTD)
+  // Compute default comparison (prev period for QTD)
   const cmp = getCompareDates(document.getElementById('startDate').value, todayStr);
   document.getElementById('compareStart').value = cmp.start;
   document.getElementById('compareEnd').value = cmp.end;
