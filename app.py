@@ -238,8 +238,20 @@ MANUFACTURER_BQ_NAMES = {
     "sanitygroup":   ["Sanity Group", "avaay Medical", "Vayamed"],
     "cantourage":    "Cantourage",
     "montu":         "Montu",
-    "novacana":      "Novacana",
-    "kineo":         "Kineo",
+    "novacana":      {
+        "multi_source": True,
+        "manufacturers": ["Remexian"],          # all products from Remexian, all dates
+        "include_category": "vape",             # all vapes...
+        "exclude_vape_manufacturers": ["Four 20 Pharma", "Four 20 pharma"],  # ...except Curaleaf
+        # Per-product attribution with optional date cutoffs.
+        # product_like: SQL LIKE pattern for oi.product_name
+        # from_date (optional): only count orders from this date onward
+        "product_rules": [
+            {"product_like": "A+ Kineo Craft No. 1%", "from_date": "2026-04-25"},  # Hash Burger: after Cantourage's initial 3000g batch on Apr 24
+            {"product_like": "A+ Kineo Jungelzzz%"},                                 # Wedding Cake: all dates
+            {"product_like": "Aleph Amber 22/1%", "from_date": "2026-05-01"},        # Mango Kush: from May (previously direct AlephSana)
+        ],
+    },
     "dunbar":        {"manufacturer": "AlephSana", "product_filter": "Kapseln"},
 }
 
@@ -259,7 +271,41 @@ def mfg_clause(mfg_name):
     if mfg_name is None:
         return ("TRUE", [])
     if isinstance(mfg_name, dict):
-        # Sub-brand filter: manufacturer + product name contains keyword
+        # --- Multi-source: composite brand spanning multiple manufacturers + category + product rules ---
+        if mfg_name.get("multi_source"):
+            or_parts = []
+            params = []
+            # 1) Full manufacturer attribution (all products, all dates)
+            mfrs = mfg_name.get("manufacturers", [])
+            if mfrs:
+                or_parts.append("oi.product_manufacturer_name IN UNNEST(@mfg_names)")
+                params.append(bigquery.ArrayQueryParameter("mfg_names", "STRING", mfrs))
+            # 2) Category-level rule (e.g. all vapes except certain manufacturers)
+            cat = mfg_name.get("include_category")
+            excl = mfg_name.get("exclude_vape_manufacturers", [])
+            if cat:
+                if excl:
+                    or_parts.append(
+                        f"(({CATEGORY_EXPR}) = @incl_cat"
+                        f" AND oi.product_manufacturer_name NOT IN UNNEST(@excl_mfgs))"
+                    )
+                    params.append(bigquery.ScalarQueryParameter("incl_cat", "STRING", cat))
+                    params.append(bigquery.ArrayQueryParameter("excl_mfgs", "STRING", excl))
+                else:
+                    or_parts.append(f"({CATEGORY_EXPR}) = @incl_cat")
+                    params.append(bigquery.ScalarQueryParameter("incl_cat", "STRING", cat))
+            # 3) Per-product rules with optional date cutoffs
+            for i, pr in enumerate(mfg_name.get("product_rules", [])):
+                pname = f"@pr_{i}_name"
+                params.append(bigquery.ScalarQueryParameter(f"pr_{i}_name", "STRING", pr["product_like"]))
+                if pr.get("from_date"):
+                    or_parts.append(f"(oi.product_name LIKE {pname} AND o.created_at >= @pr_{i}_from)")
+                    params.append(bigquery.ScalarQueryParameter(f"pr_{i}_from", "DATE", pr["from_date"]))
+                else:
+                    or_parts.append(f"oi.product_name LIKE {pname}")
+            return ("(" + " OR ".join(or_parts) + ")", params)
+
+        # --- Sub-brand filter: manufacturer + product name contains keyword ---
         clauses = []
         params = []
         mfr = mfg_name.get("manufacturer")
@@ -1319,13 +1365,20 @@ async def api_recon_combined(
     ppo_out = [{"num_products": r["products_per_order"], "count": r.get("order_count", 0)} for r in breakdowns.get("products_per_order", [])]
     brand_out = [{"brand": r["brand"], "prescriptions": r.get("prescriptions", 0), "net_revenue_eur": r.get("net_revenue_eur", 0)} for r in breakdowns.get("brands", [])]
     # Build reverse lookup: BQ manufacturer name → slug (for target matching)
+    # Also track which manufacturers are absorbed by multi_source composites
     bq_to_slug = {}
+    multi_source_slugs = {}  # slug → config for multi_source brands
     for s, bqn in MANUFACTURER_BQ_NAMES.items():
         if isinstance(bqn, str):
             bq_to_slug[bqn] = s
         elif isinstance(bqn, list):
             for n in bqn:
                 bq_to_slug[n] = s
+        elif isinstance(bqn, dict) and bqn.get("multi_source"):
+            multi_source_slugs[s] = bqn
+            for m in bqn.get("manufacturers", []):
+                bq_to_slug[m] = s  # redirect these manufacturers to the composite slug
+
     # Merge manufacturer rows that map to the same slug (e.g. "Four 20 Pharma" + "Four 20 pharma")
     _mfr_merged = {}
     for r in breakdowns.get("manufacturers", []):
@@ -1343,6 +1396,75 @@ async def api_recon_combined(
                 "volume_units": r.get("volume_units", 0) or 0,
                 "net_revenue_eur": r.get("net_revenue_eur", 0) or 0,
             }
+
+    # For multi_source composites, run a supplementary query to capture
+    # volume/revenue from category rules and product_rules that aren't
+    # already counted via manufacturer redirect. Group by source manufacturer
+    # so we can subtract from the correct rows (avoid double-counting).
+    if multi_source_slugs:
+        _dw, _dp = date_params(start, end, category)
+        for ms_slug, ms_cfg in multi_source_slugs.items():
+            if ms_slug not in _mfr_merged:
+                # Create the row if it doesn't exist yet (no manufacturer redirects hit)
+                display_name = BRAND_CONFIG.get(ms_slug, {}).get("name", ms_slug)
+                _mfr_merged[ms_slug] = {
+                    "manufacturer": display_name, "slug": ms_slug,
+                    "volume_units": 0, "net_revenue_eur": 0,
+                }
+            absorbed_mfrs = ms_cfg.get("manufacturers", [])
+            # Build OR conditions for the extra (non-manufacturer-redirect) rules
+            extra_or = []
+            extra_params = []
+            # Category rule (e.g. all vapes except certain manufacturers)
+            cat = ms_cfg.get("include_category")
+            excl = ms_cfg.get("exclude_vape_manufacturers", [])
+            if cat:
+                all_excl = excl + absorbed_mfrs  # exclude already-counted manufacturers
+                extra_or.append(
+                    f"(({CATEGORY_EXPR}) = @cat_filter"
+                    f" AND COALESCE(oi.product_manufacturer_name, 'Unknown') NOT IN UNNEST(@cat_excl))"
+                )
+                extra_params.append(bigquery.ScalarQueryParameter("cat_filter", "STRING", cat))
+                extra_params.append(bigquery.ArrayQueryParameter("cat_excl", "STRING", all_excl))
+            # Product date rules (only for products NOT from absorbed manufacturers)
+            for i, pr in enumerate(ms_cfg.get("product_rules", [])):
+                pn = f"@spr_{i}_name"
+                extra_params.append(bigquery.ScalarQueryParameter(f"spr_{i}_name", "STRING", pr["product_like"]))
+                if pr.get("from_date"):
+                    extra_or.append(f"(oi.product_name LIKE {pn} AND o.created_at >= @spr_{i}_from)")
+                    extra_params.append(bigquery.ScalarQueryParameter(f"spr_{i}_from", "DATE", pr["from_date"]))
+                else:
+                    extra_or.append(f"oi.product_name LIKE {pn}")
+            if extra_or:
+                sup_sql = f"""
+                SELECT COALESCE(oi.product_manufacturer_name, 'Unknown') AS source_mfr,
+                  SUM(oi.quantity_after_cancellations) AS volume_units,
+                  (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
+                   - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
+                   - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+                FROM `{PROJECT_DATASET}.order_items` oi
+                JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+                WHERE ({" OR ".join(extra_or)})
+                  AND COALESCE(oi.product_manufacturer_name, 'Unknown') NOT IN UNNEST(@absorbed)
+                  {_dw} {NET_ORDER_FILTER}
+                GROUP BY 1
+                """
+                sup_params = extra_params + [
+                    bigquery.ArrayQueryParameter("absorbed", "STRING", absorbed_mfrs),
+                ] + _dp
+                for sr in run_query(sup_sql, sup_params):
+                    vol = sr.get("volume_units", 0) or 0
+                    rev = sr.get("net_revenue_eur", 0) or 0
+                    # Add to composite row
+                    _mfr_merged[ms_slug]["volume_units"] += vol
+                    _mfr_merged[ms_slug]["net_revenue_eur"] += rev
+                    # Subtract from source manufacturer row to avoid double-counting
+                    src = sr["source_mfr"]
+                    src_key = bq_to_slug.get(src, "") or src
+                    if src_key in _mfr_merged and src_key != ms_slug:
+                        _mfr_merged[src_key]["volume_units"] -= vol
+                        _mfr_merged[src_key]["net_revenue_eur"] -= rev
+
     mfr_out = list(_mfr_merged.values())
 
     # Map products
