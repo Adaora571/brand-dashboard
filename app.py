@@ -299,7 +299,7 @@ def mfg_clause(mfg_name):
                 pname = f"@pr_{i}_name"
                 params.append(bigquery.ScalarQueryParameter(f"pr_{i}_name", "STRING", pr["product_like"]))
                 if pr.get("from_date"):
-                    or_parts.append(f"(oi.product_name LIKE {pname} AND o.created_at >= @pr_{i}_from)")
+                    or_parts.append(f"(oi.product_name LIKE {pname} AND DATE(o.created_at) >= @pr_{i}_from)")
                     params.append(bigquery.ScalarQueryParameter(f"pr_{i}_from", "DATE", pr["from_date"]))
                 else:
                     or_parts.append(f"oi.product_name LIKE {pname}")
@@ -1431,7 +1431,7 @@ async def api_recon_combined(
                 pn = f"@spr_{i}_name"
                 extra_params.append(bigquery.ScalarQueryParameter(f"spr_{i}_name", "STRING", pr["product_like"]))
                 if pr.get("from_date"):
-                    extra_or.append(f"(oi.product_name LIKE {pn} AND o.created_at >= @spr_{i}_from)")
+                    extra_or.append(f"(oi.product_name LIKE {pn} AND DATE(o.created_at) >= @spr_{i}_from)")
                     extra_params.append(bigquery.ScalarQueryParameter(f"spr_{i}_from", "DATE", pr["from_date"]))
                 else:
                     extra_or.append(f"oi.product_name LIKE {pn}")
