@@ -973,7 +973,8 @@ function renderBreakdowns(data) {
   createOrUpdate('chartCat',{type:'doughnut',data:{labels:cats.map(c=>c.category||'Unknown'),datasets:[{data:cats.map(c=>c.net_revenue_eur),backgroundColor:PALETTE.slice(0,cats.length),datalabels:{display:ctx=>{const total=ctx.dataset.data.reduce((a,b)=>a+b,0);return total>0&&(ctx.dataset.data[ctx.dataIndex]/total*100)>5;},color:'#fff',font:{size:11,weight:'bold'},formatter:(v,ctx)=>{const total=ctx.dataset.data.reduce((a,b)=>a+b,0);return total>0?(v/total*100).toFixed(1)+'%':'';}}}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11},generateLabels:chart=>{const ds=chart.data.datasets[0];const total=ds.data.reduce((a,b)=>a+b,0);return chart.data.labels.map((label,i)=>{const pct=total>0?(ds.data[i]/total*100).toFixed(1):'0.0';return{text:label+' ('+pct+'%)',fillStyle:ds.backgroundColor[i],strokeStyle:ds.backgroundColor[i],hidden:!chart.getDataVisibility(i),index:i};});}}}}}});
   const ori=data.origins||[];
   createOrUpdate('chartOrigin',{type:'bar',data:{labels:ori.map(o=>o.origin),datasets:[{label:'Net Rev €',data:ori.map(o=>o.net_revenue_eur),backgroundColor:PALETTE.slice(0,ori.length)}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},datalabels:{display:true,anchor:'end',align:'end',font:{size:9},color:'#1e293b',formatter:v=>fmtLabel(v)}},scales:{x:{ticks:{callback:v=>'€'+(v/1000).toFixed(0)+'k'}}}}});
-  const pt=data.price_tiers||[];
+  const TIER_ORDER=['< €6/g','€6–8/g','€8–10/g','€10–14/g','> €14/g'];
+  const pt=(data.price_tiers||[]).slice().sort((a,b)=>{const ai=TIER_ORDER.indexOf(a.price_tier);const bi=TIER_ORDER.indexOf(b.price_tier);return (ai===-1?99:ai)-(bi===-1?99:bi);});
   const ptU=getUnitLabel();
   const ptSpecific=hasSpecificCategory();
   const ptSuffix=(ptSpecific && ptU!=='units') ? '/'+ptU : '';

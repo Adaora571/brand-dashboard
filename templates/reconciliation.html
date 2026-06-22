@@ -1158,7 +1158,11 @@ function fmtAxisVolume(v) {
 }
 
 function renderPriceTierChart() {
-  const tier = allData.price_tier || [];
+  const TIER_ORDER = ['< €6/g', '€6–8/g', '€8–10/g', '€10–14/g', '> €14/g'];
+  const tier = (allData.price_tier || []).slice().sort((a, b) => {
+    const ai = TIER_ORDER.indexOf(a.tier); const bi = TIER_ORDER.indexOf(b.tier);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
   const ctx = document.getElementById('chartPrice').getContext('2d');
   if (charts.price) charts.price.destroy();
 
