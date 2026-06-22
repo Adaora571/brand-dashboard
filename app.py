@@ -541,6 +541,11 @@ CATEGORY_EXPR = """CASE
   ELSE oi.product_vertical
 END"""
 
+# Categories that count toward fee calculation (flowers and extracts only)
+FEE_ELIGIBLE_CATEGORIES = ("flower", "extract")
+_fee_cat_list = ", ".join(f"'{c}'" for c in FEE_ELIGIBLE_CATEGORIES)
+FEE_CAT_FILTER = f"({CATEGORY_EXPR}) IN ({_fee_cat_list})"
+
 
 def date_params(start_date: str, end_date: str, category: str = ""):
     """Build date + category filter SQL + params."""
@@ -684,7 +689,9 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
         SAFE_DIVIDE(COUNT(oi.order_item_id), COUNT(DISTINCT o.order_id)) AS avg_products_per_order,
         COUNT(DISTINCT o.customer_id) AS total_patients,
-        SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value
+        SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
+        SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
+        SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0) - COALESCE(oi.refund_amount_including_vat_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -762,7 +769,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     rows = run_query(sql, params)
     r = rows[0] if rows else {}
     fee = MANUFACTURER_FEES.get(slug, {})
-    fee_amount = calc_fee(fee, r.get("sales_volume_g", 0), r.get("net_revenue_eur", 0))
+    fee_amount = calc_fee(fee, r.get("fee_volume_g", 0), r.get("fee_net_revenue_eur", 0))
 
     def safe_growth(curr, prev):
         if curr is None or prev is None or prev == 0:
@@ -842,7 +849,9 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
       SAFE_DIVIDE(SUM(oi.cancelled_quantity), SUM(oi.quantity_before_cancellations)) AS cancellation_rate,
       SUM(oi.refund_amount_including_vat_eur) AS refund_eur,
-      SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate
+      SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate,
+      SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
+      SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0) - COALESCE(oi.refund_amount_including_vat_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -853,7 +862,7 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
 
     fee = MANUFACTURER_FEES.get(slug, {})
     for r in rows:
-        r["fee_amount"] = calc_fee(fee, r.get("sales_volume_g", 0), r.get("net_revenue_eur", 0))
+        r["fee_amount"] = calc_fee(fee, r.get("fee_volume_g", 0), r.get("fee_net_revenue_eur", 0))
 
     result = {"data": rows}
     cache_set(ck, result)
@@ -902,7 +911,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     sql = f"""
     SELECT
       oi.product_name,
-      oi.product_brand_name,
+      COALESCE(NULLIF(oi.product_brand_name, ''), oi.product_manufacturer_name) AS product_brand_name,
       ({CATEGORY_EXPR}) AS category,
       oi.product_country_or_origin AS origin,
       COUNT(DISTINCT o.order_id) AS prescriptions,
@@ -918,7 +927,22 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     ORDER BY revenue_eur DESC
     """
     params = mfg_p + date_p + extra_params
-    result = {"data": run_query(sql, params)}
+    rows = run_query(sql, params)
+
+    # Infer brand name from product name when BQ brand & manufacturer are both empty
+    _brand_prefixes = [
+        ("A+ Kineo", "Kineo"), ("HiDealz", "Remexian Pharma"),
+        ("Greenseal", "Remexian Pharma"), ("Aleph Amber", "AlephSana"),
+    ]
+    for r in rows:
+        if not r.get("product_brand_name"):
+            pn = r.get("product_name", "")
+            for prefix, brand_name in _brand_prefixes:
+                if pn.startswith(prefix):
+                    r["product_brand_name"] = brand_name
+                    break
+
+    result = {"data": rows}
     cache_set(ck, result)
     return result
 
@@ -1347,13 +1371,13 @@ async def api_recon_combined(
         gpct = ((r.get("revenue_eur", 0) - prev_r) / prev_r * 100) if prev_r else 0
         growth_out.append({"period": r["period"], "growth_pct": round(gpct, 1)})
 
-    # Fee detail per month
+    # Fee detail per month (fee applies only to flowers & extracts)
     fee_detail = []
     for r in trend_data:
         fee_detail.append({
             "period": r["period"],
-            "units": r.get("sales_volume_g", 0),
-            "revenue": r.get("net_revenue_eur", 0),
+            "units": r.get("fee_volume_g", 0),
+            "revenue": r.get("fee_net_revenue_eur", 0),
             "rate": fee_info.get("rate", 0),
             "fee": r.get("fee_amount", 0),
         })
