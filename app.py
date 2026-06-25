@@ -1192,6 +1192,7 @@ async def _get_categories(mfg_name: str):
     sql = f"""
     SELECT DISTINCT ({CATEGORY_EXPR}) AS category
     FROM `{PROJECT_DATASET}.order_items` oi
+    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where}
       AND oi.product_vertical IS NOT NULL
     ORDER BY 1
