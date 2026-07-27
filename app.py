@@ -250,6 +250,8 @@ MANUFACTURER_BQ_NAMES = {
             {"product_like": "A+ Kineo Craft No. 1%", "from_date": "2026-04-25"},  # Hash Burger: after Cantourage's initial 3000g batch on Apr 24
             {"product_like": "A+ Kineo Jungelzzz%"},                                 # Wedding Cake: all dates
             {"product_like": "Aleph Amber 22/1%", "from_date": "2026-05-01"},        # Mango Kush: from May (previously direct AlephSana)
+            {"product_like": "Nice 33/1%"},                                           # Lotus Punch: 3rd party from Cansativa
+            {"product_like": "HiDealz 24/1%"},                                       # Honeydew Haze: 3rd party from Remexian
         ],
     },
     "dunbar":        {"manufacturer": "AlephSana", "product_filter": "Kapseln"},
@@ -933,6 +935,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     _brand_prefixes = [
         ("A+ Kineo", "Kineo"), ("HiDealz", "Remexian Pharma"),
         ("Greenseal", "Remexian Pharma"), ("Aleph Amber", "AlephSana"),
+        ("Nice ", "Cansativa"),
     ]
     for r in rows:
         if not r.get("product_brand_name"):
