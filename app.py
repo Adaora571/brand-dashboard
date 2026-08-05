@@ -662,15 +662,27 @@ def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, l
     )
 
 
-def _product_line_sql(product_line: str) -> tuple[str, list]:
+def _product_line_sql(product_line: str, is_novacana: bool = False) -> tuple[str, list]:
     """Build product-line filter SQL + params.
 
     ``product_line`` may be comma-separated for multi-select.
+    ``is_novacana``: when True, match on both product_brand_name AND
+    product_manufacturer_name (because Novacana swaps brand↔manufacturer).
     Returns (sql_fragment, params) where sql_fragment starts with 'AND'.
     """
     if not product_line:
         return "", []
     lines = [l.strip() for l in product_line.split(",") if l.strip()]
+    if is_novacana:
+        if len(lines) == 1:
+            return (
+                "AND (oi.product_brand_name = @product_line OR oi.product_manufacturer_name = @product_line)",
+                [bigquery.ScalarQueryParameter("product_line", "STRING", lines[0])],
+            )
+        return (
+            "AND (oi.product_brand_name IN UNNEST(@product_lines) OR oi.product_manufacturer_name IN UNNEST(@product_lines))",
+            [bigquery.ArrayQueryParameter("product_lines", "STRING", lines)],
+        )
     if len(lines) == 1:
         return (
             "AND oi.product_brand_name = @product_line",
@@ -682,11 +694,18 @@ def _product_line_sql(product_line: str) -> tuple[str, list]:
     )
 
 
-def date_params(start_date: str, end_date: str, category: str = "", product_line: str = ""):
+def _slug_has_novacana(slug: str) -> bool:
+    """Check if a slug (possibly comma-separated) includes novacana."""
+    if not slug:
+        return False
+    return "novacana" in [s.strip() for s in slug.split(",")]
+
+
+def date_params(start_date: str, end_date: str, category: str = "", product_line: str = "", is_novacana: bool = False):
     """Build date + category + product_line filter SQL + params.
 
     ``category`` may be a single value or comma-separated list.
-    ``product_line`` filters by product_brand_name (or manufacturer if brand is empty).
+    ``product_line`` filters by product_brand_name (+ manufacturer for Novacana).
     """
     clauses, params = [], []
     if start_date:
@@ -704,7 +723,7 @@ def date_params(start_date: str, end_date: str, category: str = "", product_line
             clauses.append(f"({CATEGORY_EXPR}) IN UNNEST(@categories)")
             params.append(bigquery.ArrayQueryParameter("categories", "STRING", cats))
     if product_line:
-        pl_sql, pl_p = _product_line_sql(product_line)
+        pl_sql, pl_p = _product_line_sql(product_line, is_novacana=is_novacana)
         # pl_sql starts with "AND", strip it for clauses list
         clauses.append(pl_sql.lstrip("AND "))
         params.extend(pl_p)
@@ -802,9 +821,10 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category, product_line)
+    _nova = _slug_has_novacana(slug)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
     cat_sql, _cat_p = _cat_filter_sql(category)  # standalone fragment for prev CTEs (params already in date_p)
-    pl_sql, _pl_p = _product_line_sql(product_line)  # standalone fragment for prev CTEs
+    pl_sql, _pl_p = _product_line_sql(product_line, is_novacana=_nova)  # standalone fragment for prev CTEs
 
     # If the frontend doesn't supply explicit compare dates, fall back to
     # the "previous period" logic (same-length window before start_date).
@@ -990,7 +1010,8 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category, product_line)
+    _nova = _slug_has_novacana(slug)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
@@ -1043,7 +1064,8 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, product_line=product_line)
+    _nova = _slug_has_novacana(slug)
+    date_where, date_p = date_params(start_date, end_date, product_line=product_line, is_novacana=_nova)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     extra_where = ""
@@ -1136,7 +1158,8 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category, product_line)
+    _nova = _slug_has_novacana(slug)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
     mfg_where, mfg_p = mfg_clause(mfg_name)
     base_params = mfg_p + date_p
 
@@ -1239,9 +1262,10 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category, product_line)
+    _nova = _slug_has_novacana(slug)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
     cat_sql, _ = _cat_filter_sql(category)  # SQL only; params already in date_p
-    pl_sql, _ = _product_line_sql(product_line)  # SQL only; params already in date_p
+    pl_sql, _ = _product_line_sql(product_line, is_novacana=_nova)  # SQL only; params already in date_p
     mfg_where, mfg_p = mfg_clause(mfg_name)
     base_params = mfg_p + date_p
 
@@ -1329,7 +1353,8 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category, product_line)
+    _nova = _slug_has_novacana(slug)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
