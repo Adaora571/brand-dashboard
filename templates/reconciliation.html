@@ -1732,7 +1732,7 @@ function renderProducts() {
   if (!region && !brandF && !catF && !originF) productTotalCount = currentProducts.length;
 
   // Populate filter dropdowns from available data
-  const brands = [...new Set(currentProducts.map(p=>p.product_line).filter(Boolean))].sort();
+  const brands = [...new Set(currentProducts.map(p=>p.brand).filter(Boolean))].sort();
   const categories = [...new Set(currentProducts.map(p=>p.category).filter(Boolean))].sort();
   const origins = [...new Set(currentProducts.map(p=>p.origin).filter(Boolean))].sort();
   populateSelect('filterBrand', brands, 'All Product Lines');
@@ -1755,7 +1755,7 @@ function renderProductTable() {
   const origin   = document.getElementById('filterOrigin')?.value || '';
 
   let filtered = currentProducts;
-  if (brand)    filtered = filtered.filter(p => p.product_line === brand);
+  if (brand)    filtered = filtered.filter(p => p.brand === brand);
   if (category) filtered = filtered.filter(p => p.category === category);
   if (origin)   filtered = filtered.filter(p => p.origin === origin);
 
@@ -1876,7 +1876,7 @@ function exportProductCSV() {
   const category = document.getElementById('filterCategory')?.value || '';
   const origin   = document.getElementById('filterOrigin')?.value || '';
   let filtered = currentProducts;
-  if (brand)    filtered = filtered.filter(p => p.product_line === brand);
+  if (brand)    filtered = filtered.filter(p => p.brand === brand);
   if (category) filtered = filtered.filter(p => p.category === category);
   if (origin)   filtered = filtered.filter(p => p.origin === origin);
   for (const [ci, f] of Object.entries(colFilters.prod)) {
