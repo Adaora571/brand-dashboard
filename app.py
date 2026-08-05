@@ -1066,8 +1066,9 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     sql = f"""
     SELECT
       oi.product_name,
-      COALESCE(NULLIF(oi.product_brand_name, ''), oi.product_manufacturer_name) AS product_brand_name,
+      oi.product_brand_name,
       oi.product_manufacturer_name AS product_manufacturer_name,
+      COALESCE(NULLIF(oi.product_brand_name, ''), oi.product_manufacturer_name) AS product_line,
       ({CATEGORY_EXPR}) AS category,
       oi.product_country_or_origin AS origin,
       COUNT(DISTINCT o.order_id) AS prescriptions,
@@ -1079,7 +1080,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {extra_where} {NET_ORDER_FILTER}
-    GROUP BY 1,2,3,4,5
+    GROUP BY 1,2,3,4,5,6
     ORDER BY revenue_eur DESC
     """
     params = mfg_p + date_p + extra_params
@@ -1692,6 +1693,7 @@ async def api_recon_combined(
     prod_out = [{
         "name": r.get("product_name"),
         "brand": r.get("product_brand_name"),
+        "product_line": r.get("product_line"),
         "category": r.get("category"),
         "origin": r.get("origin"),
         "num_rx": r.get("prescriptions"),
