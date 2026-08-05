@@ -662,11 +662,31 @@ def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, l
     )
 
 
-def date_params(start_date: str, end_date: str, category: str = ""):
-    """Build date + category filter SQL + params.
+def _product_line_sql(product_line: str) -> tuple[str, list]:
+    """Build product-line filter SQL + params.
+
+    ``product_line`` may be comma-separated for multi-select.
+    Returns (sql_fragment, params) where sql_fragment starts with 'AND'.
+    """
+    if not product_line:
+        return "", []
+    lines = [l.strip() for l in product_line.split(",") if l.strip()]
+    if len(lines) == 1:
+        return (
+            "AND COALESCE(NULLIF(oi.product_brand_name, ''), oi.product_manufacturer_name) = @product_line",
+            [bigquery.ScalarQueryParameter("product_line", "STRING", lines[0])],
+        )
+    return (
+        "AND COALESCE(NULLIF(oi.product_brand_name, ''), oi.product_manufacturer_name) IN UNNEST(@product_lines)",
+        [bigquery.ArrayQueryParameter("product_lines", "STRING", lines)],
+    )
+
+
+def date_params(start_date: str, end_date: str, category: str = "", product_line: str = ""):
+    """Build date + category + product_line filter SQL + params.
 
     ``category`` may be a single value or comma-separated list.
-    A single value uses ``= @category``; multiple values use ``IN UNNEST(@categories)``.
+    ``product_line`` filters by product_brand_name (or manufacturer if brand is empty).
     """
     clauses, params = [], []
     if start_date:
@@ -683,6 +703,11 @@ def date_params(start_date: str, end_date: str, category: str = ""):
         else:
             clauses.append(f"({CATEGORY_EXPR}) IN UNNEST(@categories)")
             params.append(bigquery.ArrayQueryParameter("categories", "STRING", cats))
+    if product_line:
+        pl_sql, pl_p = _product_line_sql(product_line)
+        # pl_sql starts with "AND", strip it for clauses list
+        clauses.append(pl_sql.lstrip("AND "))
+        params.extend(pl_p)
     where = (" AND " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
@@ -766,18 +791,20 @@ async def brand_logout(request: Request, hashed_slug: str):
 # API HELPER FUNCTIONS — DRY query logic for brand and recon APIs
 # ============================================================
 async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", compare_start: str = "", compare_end: str = ""):
+    category: str = "", compare_start: str = "", compare_end: str = "",
+    product_line: str = ""):
     """Internal helper for summary query, used by both brand and recon APIs."""
 
     # Check cache first
     ck = cache_key("summary", slug=slug, s=start_date, e=end_date, cat=category,
-                   cs=compare_start, ce=compare_end)
+                   cs=compare_start, ce=compare_end, pl=product_line)
     cached = cache_get(ck)
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category)
+    date_where, date_p = date_params(start_date, end_date, category, product_line)
     cat_sql, _cat_p = _cat_filter_sql(category)  # standalone fragment for prev CTEs (params already in date_p)
+    pl_sql, _pl_p = _product_line_sql(product_line)  # standalone fragment for prev CTEs
 
     # If the frontend doesn't supply explicit compare dates, fall back to
     # the "previous period" logic (same-length window before start_date).
@@ -856,7 +883,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
         AND {compare_clause}
-        {cat_sql}
+        {cat_sql} {pl_sql}
     ),
     prev_repeat AS (
       SELECT
@@ -867,7 +894,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
         WHERE {mfg_where} {NET_ORDER_FILTER}
           AND {compare_clause}
-          {cat_sql}
+          {cat_sql} {pl_sql}
       ) prev_customers
       JOIN (
         SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS lifetime_orders
@@ -954,15 +981,16 @@ async def api_summary(
 # ============================================================
 # API: Monthly Trends (Helper)
 # ============================================================
-async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
+    category: str = "", product_line: str = ""):
     """Internal helper for trends query, used by both brand and recon APIs."""
 
-    ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category)
+    ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
     cached = cache_get(ck)
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category)
+    date_where, date_p = date_params(start_date, end_date, category, product_line)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
@@ -1005,16 +1033,17 @@ async def api_trends(request: Request, hashed_slug: str, start_date: str = "", e
 # API: Products (with region, brand, category, origin filters) (Helper)
 # ============================================================
 async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    region: str = "", brand: str = "", category: str = "", origin: str = ""):
+    region: str = "", brand: str = "", category: str = "", origin: str = "",
+    product_line: str = ""):
     """Internal helper for products query, used by both brand and recon APIs."""
 
     ck = cache_key("products", slug=slug, s=start_date, e=end_date,
-                   region=region, brand=brand, category=category, origin=origin)
+                   region=region, brand=brand, category=category, origin=origin, pl=product_line)
     cached = cache_get(ck)
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date)
+    date_where, date_p = date_params(start_date, end_date, product_line=product_line)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     extra_where = ""
@@ -1070,14 +1099,14 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
                     r["product_brand_name"] = brand_name
                     break
 
-    # Novacana-specific: when brand_name == 'Novacana', display the manufacturer
-    # as the product line instead (so you see "Cansativa", "Remexian", etc.)
-    if slug == "novacana":
-        for r in rows:
-            if (r.get("product_brand_name") or "").lower() == "novacana":
-                mfr = r.get("product_manufacturer_name") or ""
-                if mfr:
-                    r["product_brand_name"] = mfr
+    # Novacana brand swap: when brand_name == 'Novacana' but manufacturer is
+    # something else (Cansativa, Remexian, etc.), show the manufacturer as the
+    # product line. When manufacturer IS 'Novacana', normal logic applies.
+    for r in rows:
+        if (r.get("product_brand_name") or "").lower() == "novacana":
+            mfr = (r.get("product_manufacturer_name") or "").strip()
+            if mfr and mfr.lower() != "novacana":
+                r["product_brand_name"] = mfr
 
     result = {"data": rows}
     cache_set(ck, result)
@@ -1097,16 +1126,17 @@ async def api_products(
 # ============================================================
 # API: Breakdowns (category, origin, price tier, products/order, brand) (Helper)
 # ============================================================
-async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
+    category: str = "", product_line: str = ""):
     """Internal helper for breakdowns query, used by both brand and recon APIs."""
 
     # Check cache first
-    ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category)
+    ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
     cached = cache_get(ck)
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category)
+    date_where, date_p = date_params(start_date, end_date, category, product_line)
     mfg_where, mfg_p = mfg_clause(mfg_name)
     base_params = mfg_p + date_p
 
@@ -1200,16 +1230,18 @@ async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "
 # ============================================================
 # API: Patient Insights (Helper)
 # ============================================================
-async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
+    category: str = "", product_line: str = ""):
     """Internal helper for patients query, used by both brand and recon APIs."""
 
-    ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category)
+    ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
     cached = cache_get(ck)
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category)
+    date_where, date_p = date_params(start_date, end_date, category, product_line)
     cat_sql, _ = _cat_filter_sql(category)  # SQL only; params already in date_p
+    pl_sql, _ = _product_line_sql(product_line)  # SQL only; params already in date_p
     mfg_where, mfg_p = mfg_clause(mfg_name)
     base_params = mfg_p + date_p
 
@@ -1219,7 +1251,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
-        {cat_sql}
+        {cat_sql} {pl_sql}
       GROUP BY 1
     )
     SELECT
@@ -1288,15 +1320,16 @@ async def api_patients(request: Request, hashed_slug: str, start_date: str = "",
 # ============================================================
 # API: Pricing (Avg €/g over time) (Helper)
 # ============================================================
-async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
+    category: str = "", product_line: str = ""):
     """Internal helper for pricing query, used by both brand and recon APIs."""
 
-    ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category)
+    ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
     cached = cache_get(ck)
     if cached:
         return cached
 
-    date_where, date_p = date_params(start_date, end_date, category)
+    date_where, date_p = date_params(start_date, end_date, category, product_line)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
@@ -1349,27 +1382,29 @@ async def api_categories(request: Request, hashed_slug: str):
 # ============================================================
 # MARKET SHARE HELPER (used by reconciliation dashboard)
 # ============================================================
-async def _get_platform_total_rx(start_date: str = "", end_date: str = "", category: str = ""):
+async def _get_platform_total_rx(start_date: str = "", end_date: str = "", category: str = "",
+    product_line: str = ""):
     """Get total prescriptions across ALL manufacturers on the platform."""
     s = start_date or "2020-01-01"
     e = end_date or datetime.now().strftime("%Y-%m-%d")
-    ck = cache_key("platform_total", s=s, e=e, cat=category)
+    ck = cache_key("platform_total", s=s, e=e, cat=category, pl=product_line)
     cached = cache_get(ck)
     if cached:
         return cached
 
     cat_frag, cat_p = _cat_filter_sql(category)
+    pl_frag, pl_p = _product_line_sql(product_line)
     sql = f"""
     SELECT COUNT(DISTINCT o.order_id) AS total_rx
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE DATE(o.created_at) >= DATE(@start) AND DATE(o.created_at) <= DATE(@end)
-      {NET_ORDER_FILTER} {cat_frag}
+      {NET_ORDER_FILTER} {cat_frag} {pl_frag}
     """
     params = [
         bigquery.ScalarQueryParameter("start", "DATE", s),
         bigquery.ScalarQueryParameter("end", "DATE", e),
-    ] + cat_p
+    ] + cat_p + pl_p
 
     rows = run_query(sql, params)
     result = rows[0].get("total_rx", 0) if rows else 0
@@ -1423,7 +1458,7 @@ async def recon_logout(request: Request):
 async def api_recon_combined(
     request: Request, slug: str,
     start: str = "", end: str = "", cstart: str = "", cend: str = "",
-    category: str = "",
+    category: str = "", product_line: str = "",
 ):
     """Combined reconciliation endpoint — returns all data in one response.
 
@@ -1432,6 +1467,7 @@ async def api_recon_combined(
       - single slug        → one brand
       - comma-separated    → multiple brands (multi-select)
     ``category`` may also be comma-separated for multi-category.
+    ``product_line`` filters by product_brand_name (affects all KPIs/charts).
     """
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
@@ -1471,15 +1507,16 @@ async def api_recon_combined(
         comp_s, comp_e = comp_s_dt.strftime("%Y-%m-%d"), comp_e_dt.strftime("%Y-%m-%d")
 
     # Run all queries in parallel (including platform total for market share)
+    pl = product_line
     summary, trends, products, breakdowns, patients, patients_prev, pricing, platform_rx = await asyncio.gather(
-        _get_summary(mfg_name, slug, start, end, category, cstart, cend),
-        _get_trends(mfg_name, slug, start, end, category),
-        _get_products(mfg_name, slug, start, end, category=category),
-        _get_breakdowns(mfg_name, slug, start, end, category),
-        _get_patients(mfg_name, slug, start, end, category),
-        _get_patients(mfg_name, slug, comp_s, comp_e, category),
-        _get_pricing(mfg_name, slug, start, end, category),
-        _get_platform_total_rx(start, end, category),
+        _get_summary(mfg_name, slug, start, end, category, cstart, cend, product_line=pl),
+        _get_trends(mfg_name, slug, start, end, category, product_line=pl),
+        _get_products(mfg_name, slug, start, end, category=category, product_line=pl),
+        _get_breakdowns(mfg_name, slug, start, end, category, product_line=pl),
+        _get_patients(mfg_name, slug, start, end, category, product_line=pl),
+        _get_patients(mfg_name, slug, comp_s, comp_e, category, product_line=pl),
+        _get_pricing(mfg_name, slug, start, end, category, product_line=pl),
+        _get_platform_total_rx(start, end, category, product_line=pl),
     )
 
     # Map summary → kpi / kpi_compare

@@ -692,6 +692,7 @@ function getProRatedTarget(slug, startStr, endStr) {
 // State
 let selectedBrands = new Set();    // empty = "all brands"
 let selectedCategories = new Set(); // empty = "all categories"
+let selectedProductLine = '';       // page-level product line filter
 let allData = {};
 let currentProducts = [];
 let currentFees = [];
@@ -931,6 +932,7 @@ async function loadAll() {
   const slugParam = getSlugParam();
   let url = `/api/recon/${slugParam}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}`;
   if (cat) url += `&category=${encodeURIComponent(cat)}`;
+  if (selectedProductLine) url += `&product_line=${encodeURIComponent(selectedProductLine)}`;
 
   try {
     const resp = await fetch(url);
@@ -1734,6 +1736,7 @@ function renderProducts() {
   const categories = [...new Set(currentProducts.map(p=>p.category).filter(Boolean))].sort();
   const origins = [...new Set(currentProducts.map(p=>p.origin).filter(Boolean))].sort();
   populateSelect('filterBrand', brands, 'All Product Lines');
+  if (selectedProductLine) document.getElementById('filterBrand').value = selectedProductLine;
   populateSelect('filterCategory', categories, 'All Categories');
   populateSelect('filterOrigin', origins, 'All Origins');
 
@@ -1805,6 +1808,14 @@ function applyProductFilters() {
   const origin   = document.getElementById('filterOrigin').value;
   const active = [region, brand, category, origin].filter(Boolean);
   document.getElementById('filterTag').textContent = active.length > 0 ? `— filtered by: ${active.join(', ')}` : '';
+
+  // Product Line filter affects entire page (server-side)
+  if (brand !== selectedProductLine) {
+    selectedProductLine = brand;
+    updateProductLineIndicator();
+    loadAll();
+    return;
+  }
   renderProductTable();
 }
 
@@ -1816,7 +1827,36 @@ function clearProductFilters() {
   document.getElementById('filterTag').textContent = '';
   colFilters.prod = {};
   updateFilterBtnStates();
+  const hadPL = !!selectedProductLine;
+  selectedProductLine = '';
+  updateProductLineIndicator();
+  if (hadPL) { loadAll(); return; }
   renderProductTable();
+}
+
+function updateProductLineIndicator() {
+  let el = document.getElementById('plIndicator');
+  if (selectedProductLine) {
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'plIndicator';
+      el.style.cssText = 'background:#7c3aed;color:#fff;padding:6px 16px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:12px;display:inline-flex;align-items:center;gap:8px;';
+      const sections = document.querySelector('.section-title');
+      sections.parentNode.insertBefore(el, sections);
+    }
+    el.innerHTML = `🔍 Page filtered by Product Line: <strong>${selectedProductLine}</strong> <button onclick="clearProductLineFilter()" style="background:rgba(255,255,255,.25);border:none;color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:12px;">✕ Clear</button>`;
+    el.style.display = 'inline-flex';
+  } else if (el) {
+    el.style.display = 'none';
+  }
+}
+
+function clearProductLineFilter() {
+  selectedProductLine = '';
+  document.getElementById('filterBrand').value = '';
+  updateProductLineIndicator();
+  document.getElementById('filterTag').textContent = '';
+  loadAll();
 }
 
 function populateSelect(id, options, allLabel) {
