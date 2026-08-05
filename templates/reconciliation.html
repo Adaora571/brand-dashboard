@@ -693,6 +693,7 @@ function getProRatedTarget(slug, startStr, endStr) {
 let selectedBrands = new Set();    // empty = "all brands"
 let selectedCategories = new Set(); // empty = "all categories"
 let selectedProductLine = '';       // page-level product line filter
+let cachedProductLines = [];        // full list of product lines (cached from unfiltered load)
 let allData = {};
 let currentProducts = [];
 let currentFees = [];
@@ -1733,10 +1734,12 @@ function renderProducts() {
 
   // Populate filter dropdowns from available data
   const brands = [...new Set(currentProducts.map(p=>p.brand).filter(Boolean))].sort();
+  // Cache the full product line list when no product line filter is active
+  if (!selectedProductLine) cachedProductLines = brands;
+  populateSelect('filterBrand', cachedProductLines.length ? cachedProductLines : brands, 'All Product Lines');
+  if (selectedProductLine) document.getElementById('filterBrand').value = selectedProductLine;
   const categories = [...new Set(currentProducts.map(p=>p.category).filter(Boolean))].sort();
   const origins = [...new Set(currentProducts.map(p=>p.origin).filter(Boolean))].sort();
-  populateSelect('filterBrand', brands, 'All Product Lines');
-  if (selectedProductLine) document.getElementById('filterBrand').value = selectedProductLine;
   populateSelect('filterCategory', categories, 'All Categories');
   populateSelect('filterOrigin', origins, 'All Origins');
 

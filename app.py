@@ -992,10 +992,11 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
 async def api_summary(
     request: Request, hashed_slug: str, start_date: str = "", end_date: str = "",
     category: str = "", compare_start: str = "", compare_end: str = "",
+    product_line: str = "",
 ):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
-    return await _get_summary(mfg_name, slug, start_date, end_date, category, compare_start, compare_end)
+    return await _get_summary(mfg_name, slug, start_date, end_date, category, compare_start, compare_end, product_line)
 
 
 # ============================================================
@@ -1044,10 +1045,10 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
 
 
 @app.get("/api/brand/{hashed_slug}/trends")
-async def api_trends(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def api_trends(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
-    return await _get_trends(mfg_name, slug, start_date, end_date, category)
+    return await _get_trends(mfg_name, slug, start_date, end_date, category, product_line)
 
 
 # ============================================================
@@ -1139,10 +1140,11 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
 async def api_products(
     request: Request, hashed_slug: str, start_date: str = "", end_date: str = "",
     region: str = "", brand: str = "", category: str = "", origin: str = "",
+    product_line: str = "",
 ):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
-    return await _get_products(mfg_name, slug, start_date, end_date, region, brand, category, origin)
+    return await _get_products(mfg_name, slug, start_date, end_date, region, brand, category, origin, product_line)
 
 
 # ============================================================
@@ -1244,10 +1246,10 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
 
 
 @app.get("/api/brand/{hashed_slug}/breakdowns")
-async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
-    return await _get_breakdowns(mfg_name, slug, start_date, end_date, category)
+    return await _get_breakdowns(mfg_name, slug, start_date, end_date, category, product_line)
 
 
 # ============================================================
@@ -1335,10 +1337,10 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
 
 
 @app.get("/api/brand/{hashed_slug}/patients")
-async def api_patients(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def api_patients(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
-    return await _get_patients(mfg_name, slug, start_date, end_date, category)
+    return await _get_patients(mfg_name, slug, start_date, end_date, category, product_line)
 
 
 # ============================================================
@@ -1373,10 +1375,10 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
 
 
 @app.get("/api/brand/{hashed_slug}/pricing")
-async def api_pricing(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = ""):
+async def api_pricing(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
-    return await _get_pricing(mfg_name, slug, start_date, end_date, category)
+    return await _get_pricing(mfg_name, slug, start_date, end_date, category, product_line)
 
 
 # ============================================================
