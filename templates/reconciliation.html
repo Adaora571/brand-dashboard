@@ -196,6 +196,66 @@
   .cfp-cond-select { min-width:110px; }
   .cfp-cond-input { flex:1; min-width:0; }
 
+  /* Multi-select dropdown component */
+  .ms-dropdown { position:relative; display:inline-block; }
+  .ms-trigger {
+    background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.22);
+    border-radius:10px; padding:9px 32px 9px 16px; font-size:12px; font-family:inherit;
+    cursor:pointer; min-width:180px; font-weight:500;
+    backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+    box-shadow:0 2px 8px rgba(0,0,0,0.12),inset 0 1px 0 rgba(255,255,255,0.15);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    position:relative; user-select:none;
+  }
+  .ms-trigger:hover { border-color:rgba(255,255,255,0.4); background:rgba(255,255,255,0.18); }
+  .ms-trigger::after {
+    content:'▾'; position:absolute; right:12px; top:50%; transform:translateY(-50%);
+    font-size:10px; opacity:0.6; pointer-events:none;
+  }
+  .ms-panel {
+    position:absolute; top:calc(100% + 6px); left:0; z-index:1001;
+    background:#fff; border:1px solid var(--border); border-radius:10px;
+    box-shadow:0 8px 30px rgba(0,0,0,0.15); min-width:220px; max-width:300px;
+    display:none; color:var(--text); overflow:hidden;
+  }
+  .ms-panel.open { display:block; }
+  .ms-search {
+    width:100%; padding:8px 12px; border:none; border-bottom:1px solid var(--border);
+    font-size:12px; font-family:inherit; outline:none;
+  }
+  .ms-options { max-height:260px; overflow-y:auto; padding:6px 0; }
+  .ms-opt {
+    display:flex; align-items:center; gap:8px; padding:6px 14px;
+    font-size:12px; cursor:pointer; transition:background 0.1s;
+  }
+  .ms-opt:hover { background:#f1f5f9; }
+  .ms-opt input[type=checkbox] { accent-color:var(--accent); flex-shrink:0; }
+  .ms-opt.ms-all { font-weight:600; border-bottom:1px solid #f1f5f9; padding-bottom:8px; margin-bottom:2px; }
+  .ms-actions {
+    display:flex; justify-content:flex-end; gap:8px; padding:8px 12px;
+    border-top:1px solid var(--border); background:#fafbfc;
+  }
+  .ms-actions button {
+    padding:5px 14px; border-radius:6px; font-size:11px; font-weight:600;
+    cursor:pointer; border:1px solid var(--border); font-family:inherit;
+  }
+  .ms-actions .ms-clear-btn { background:#fff; color:var(--muted); }
+  .ms-actions .ms-apply-btn { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .ms-badge {
+    display:inline-block; background:rgba(255,255,255,0.25); border-radius:10px;
+    padding:1px 7px; font-size:10px; font-weight:700; margin-left:6px; vertical-align:middle;
+  }
+
+  /* Comparison custom dates */
+  .compare-custom-dates { display:flex; gap:10px; margin-top:10px; align-items:center; }
+  .compare-custom-dates label { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; min-width:30px; }
+  .compare-custom-dates input[type=date] {
+    flex:1; border:1px solid var(--border); border-radius:6px;
+    padding:6px 8px; font-size:11px; font-family:inherit; outline:none;
+    color:var(--text); background:#fff;
+  }
+  .compare-custom-dates input[type=date]:focus { border-color:var(--accent); box-shadow:0 0 0 2px rgba(5,137,211,0.1); }
+
   @media (max-width:1100px) {
     .grid-6 { grid-template-columns: repeat(3, 1fr); }
     .grid-5 { grid-template-columns: repeat(3, 1fr); }
@@ -223,13 +283,31 @@
     </svg>
   </a>
   <div class="header-controls pos-rel">
-    <select id="brandSelector" onchange="changeBrand()" class="brand-selector">
-      <option value="all">All Brands</option>
-    </select>
+    <!-- Multi-select Brand dropdown -->
+    <div class="ms-dropdown" id="brandDropdown">
+      <div class="ms-trigger" id="brandTrigger" onclick="toggleMsPanel('brand')">All Brands</div>
+      <div class="ms-panel" id="brandPanel">
+        <input class="ms-search" id="brandSearch" placeholder="Search brands…" oninput="filterMsOptions('brand')">
+        <div class="ms-options" id="brandOptions"></div>
+        <div class="ms-actions">
+          <button class="ms-clear-btn" onclick="msClearAll('brand')">Clear</button>
+          <button class="ms-apply-btn" onclick="msApply('brand')">Apply</button>
+        </div>
+      </div>
+    </div>
 
-    <select id="globalCategory" onchange="changeBrand()" class="brand-selector" style="min-width:140px;">
-      <option value="">All Categories</option>
-    </select>
+    <!-- Multi-select Category dropdown -->
+    <div class="ms-dropdown" id="categoryDropdown">
+      <div class="ms-trigger" id="categoryTrigger" onclick="toggleMsPanel('category')">All Categories</div>
+      <div class="ms-panel" id="categoryPanel">
+        <input class="ms-search" id="categorySearch" placeholder="Search categories…" oninput="filterMsOptions('category')">
+        <div class="ms-options" id="categoryOptions"></div>
+        <div class="ms-actions">
+          <button class="ms-clear-btn" onclick="msClearAll('category')">Clear</button>
+          <button class="ms-apply-btn" onclick="msApply('category')">Apply</button>
+        </div>
+      </div>
+    </div>
 
     <button class="date-trigger" id="dateTrigger" onclick="toggleDatePanel()">
       <span class="date-icon">📅</span>
@@ -274,6 +352,13 @@
               <button class="compare-opt" data-cmp="wow" onclick="setCompareMode(this)">WoW</button>
               <button class="compare-opt" data-cmp="dod" onclick="setCompareMode(this)">DoD</button>
               <button class="compare-opt" data-cmp="yoy" onclick="setCompareMode(this)">YoY</button>
+              <button class="compare-opt" data-cmp="custom" onclick="setCompareMode(this)">Custom</button>
+            </div>
+            <div class="compare-custom-dates" id="compareCustomDates" style="display:none;">
+              <label>From</label>
+              <input type="date" id="dpCompFrom" onchange="updateCompareInfo()">
+              <label>To</label>
+              <input type="date" id="dpCompTo" onchange="updateCompareInfo()">
             </div>
             <div class="compare-info" id="compareInfo">📊 Comparing to: <strong id="compareRangeText">—</strong></div>
           </div>
@@ -605,18 +690,129 @@ function getProRatedTarget(slug, startStr, endStr) {
 }
 
 // State
-let selectedBrandSlug = 'all';
+let selectedBrands = new Set();    // empty = "all brands"
+let selectedCategories = new Set(); // empty = "all categories"
 let allData = {};
 let currentProducts = [];
 let currentFees = [];
 let charts = {};
 let availableCategories = [];
 
+// Derived slug string for API calls
+function getSlugParam() {
+  if (selectedBrands.size === 0) return 'all';
+  return [...selectedBrands].join(',');
+}
+function getCategoryParam() {
+  if (selectedCategories.size === 0) return '';
+  return [...selectedCategories].join(',');
+}
+
+// ── Multi-select dropdown component ──
+function toggleMsPanel(type) {
+  const panel = document.getElementById(type + 'Panel');
+  const isOpen = panel.classList.contains('open');
+  // Close all panels first
+  document.querySelectorAll('.ms-panel').forEach(p => p.classList.remove('open'));
+  if (!isOpen) {
+    panel.classList.add('open');
+    document.getElementById(type + 'Search').focus();
+  }
+}
+
+function filterMsOptions(type) {
+  const q = document.getElementById(type + 'Search').value.toLowerCase();
+  document.querySelectorAll(`#${type}Options .ms-opt:not(.ms-all)`).forEach(opt => {
+    const label = opt.querySelector('span')?.textContent?.toLowerCase() || '';
+    opt.style.display = label.includes(q) ? '' : 'none';
+  });
+}
+
+function buildMsOptions(type, items, selected) {
+  // items: [{value, label}]
+  const container = document.getElementById(type + 'Options');
+  const allChecked = selected.size === 0;
+  let html = `<label class="ms-opt ms-all"><input type="checkbox" ${allChecked ? 'checked' : ''}
+    onchange="msToggleAll('${type}', this.checked)"><span>All</span></label>`;
+  items.forEach(item => {
+    const checked = selected.has(item.value) ? 'checked' : '';
+    html += `<label class="ms-opt" data-value="${item.value}"><input type="checkbox" ${checked}
+      onchange="msToggleOne('${type}', '${item.value}', this.checked)"><span>${item.label}</span></label>`;
+  });
+  container.innerHTML = html;
+}
+
+function msToggleAll(type, checked) {
+  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  if (checked) {
+    sel.clear();
+  }
+  // Update all checkboxes
+  document.querySelectorAll(`#${type}Options .ms-opt:not(.ms-all) input`).forEach(cb => {
+    cb.checked = false;
+  });
+  document.querySelector(`#${type}Options .ms-all input`).checked = true;
+  updateMsTriggerText(type);
+}
+
+function msToggleOne(type, value, checked) {
+  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  if (checked) {
+    sel.add(value);
+  } else {
+    sel.delete(value);
+  }
+  // Update "All" checkbox
+  const allCb = document.querySelector(`#${type}Options .ms-all input`);
+  if (allCb) allCb.checked = sel.size === 0;
+  updateMsTriggerText(type);
+}
+
+function msClearAll(type) {
+  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  sel.clear();
+  document.querySelectorAll(`#${type}Options input[type=checkbox]`).forEach(cb => cb.checked = false);
+  const allCb = document.querySelector(`#${type}Options .ms-all input`);
+  if (allCb) allCb.checked = true;
+  updateMsTriggerText(type);
+  msApply(type);
+}
+
+function msApply(type) {
+  document.getElementById(type + 'Panel').classList.remove('open');
+  onFilterChange(type === 'brand');
+}
+
+function updateMsTriggerText(type) {
+  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  const trigger = document.getElementById(type + 'Trigger');
+  const allLabel = type === 'brand' ? 'All Brands' : 'All Categories';
+  if (sel.size === 0) {
+    trigger.textContent = allLabel;
+  } else if (sel.size === 1) {
+    const val = [...sel][0];
+    if (type === 'brand') {
+      trigger.textContent = BRANDS_DATA[val]?.name || val;
+    } else {
+      trigger.textContent = val;
+    }
+  } else {
+    trigger.innerHTML = `${sel.size} selected<span class="ms-badge">${sel.size}</span>`;
+  }
+}
+
+// Close multi-select panels on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.ms-dropdown')) {
+    document.querySelectorAll('.ms-panel').forEach(p => p.classList.remove('open'));
+  }
+});
+
 // ── Dynamic unit helpers (ported from brand dashboard) ──
 function getEffectiveCategory() {
-  const selected = (document.getElementById('globalCategory')?.value || '').toLowerCase();
-  if (selected) return selected;
-  if (availableCategories.length === 1) return availableCategories[0].toLowerCase();
+  const cats = [...selectedCategories];
+  if (cats.length === 1) return cats[0].toLowerCase();
+  if (cats.length === 0 && availableCategories.length === 1) return availableCategories[0].toLowerCase();
   return '';
 }
 function getUnitLabel() {
@@ -651,14 +847,11 @@ let productTotalCount = 0;
 document.addEventListener('DOMContentLoaded', initBrands);
 
 async function initBrands() {
-  const sel = document.getElementById('brandSelector');
-  Object.keys(BRANDS_DATA).forEach(slug => {
-    const brand = BRANDS_DATA[slug];
-    const opt = document.createElement('option');
-    opt.value = slug;
-    opt.textContent = brand.name;
-    sel.appendChild(opt);
-  });
+  // Build brand multi-select options
+  const brandItems = Object.keys(BRANDS_DATA).map(slug => ({
+    value: slug, label: BRANDS_DATA[slug].name
+  })).sort((a, b) => a.label.localeCompare(b.label));
+  buildMsOptions('brand', brandItems, selectedBrands);
 
   // Compute default comparison dates (QTD) before first load
   const todayStr = isoDate(new Date());
@@ -685,35 +878,35 @@ async function initBrands() {
 
 async function loadCategories() {
   try {
-    const resp = await fetch(`/api/recon/${selectedBrandSlug}/categories`);
+    const slugParam = getSlugParam();
+    // For multi-brand, fetch categories for "all" (superset)
+    const catSlug = slugParam.includes(',') ? 'all' : slugParam;
+    const resp = await fetch(`/api/recon/${catSlug}/categories`);
     if (!resp.ok) return;
     const data = await resp.json();
     availableCategories = data.categories || [];
-    const sel = document.getElementById('globalCategory');
-    const curr = sel.value;
-    // Keep first "All Categories" option, remove rest
-    while (sel.options.length > 1) sel.remove(1);
-    availableCategories.forEach(cat => {
-      const opt = document.createElement('option');
-      opt.value = cat;
-      opt.textContent = cat;
-      sel.appendChild(opt);
+    // Rebuild multi-select, preserving current selections
+    const catItems = availableCategories.map(c => ({value: c, label: c}));
+    // Remove selections that are no longer valid
+    selectedCategories.forEach(c => {
+      if (!availableCategories.includes(c)) selectedCategories.delete(c);
     });
-    sel.value = curr; // restore selection if still valid
+    buildMsOptions('category', catItems, selectedCategories);
+    updateMsTriggerText('category');
   } catch (e) {
     console.error('Categories load failed:', e);
   }
 }
 
-async function changeBrand() {
-  const prevSlug = selectedBrandSlug;
-  selectedBrandSlug = document.getElementById('brandSelector').value || 'all';
-  // Show/hide Fee Terms section based on brand selection
+async function onFilterChange(brandChanged = false) {
+  const slugParam = getSlugParam();
+  const isSingleBrand = selectedBrands.size === 1;
+  // Show/hide Fee Terms section: only for single brand selection
   const feeSection = document.getElementById('feeSection');
-  feeSection.style.display = (selectedBrandSlug === 'all') ? 'none' : '';
-  document.getElementById('mfrSection').style.display = (selectedBrandSlug === 'all') ? '' : 'none';
-  // Reload categories if brand changed (not just category filter change)
-  if (selectedBrandSlug !== prevSlug) await loadCategories();
+  feeSection.style.display = isSingleBrand ? '' : 'none';
+  document.getElementById('mfrSection').style.display = isSingleBrand ? 'none' : '';
+  // Reload categories if brand selection changed
+  if (brandChanged) await loadCategories();
   await loadAll();
 }
 
@@ -734,8 +927,9 @@ async function loadAll() {
   const e = document.getElementById('endDate').value;
   const cs = document.getElementById('compareStart').value;
   const ce = document.getElementById('compareEnd').value;
-  const cat = document.getElementById('globalCategory')?.value || '';
-  let url = `/api/recon/${selectedBrandSlug}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}`;
+  const cat = getCategoryParam();
+  const slugParam = getSlugParam();
+  let url = `/api/recon/${slugParam}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}`;
   if (cat) url += `&category=${encodeURIComponent(cat)}`;
 
   try {
@@ -828,7 +1022,7 @@ function renderKPIs() {
 }
 
 function renderDealTerms() {
-  const slug = selectedBrandSlug;
+  const slug = selectedBrands.size === 1 ? [...selectedBrands][0] : '';
   const fee = FEES_DATA[slug];
   if (!fee) {
     document.getElementById('dealTermsCard').style.display = 'none';
@@ -851,7 +1045,7 @@ function renderFees() {
   let html = '';
   let totVol = 0, totRev = 0, totFee = 0;
 
-  const feeInfo = FEES_DATA[selectedBrandSlug] || {};
+  const feeInfo = FEES_DATA[selectedBrands.size === 1 ? [...selectedBrands][0] : ''] || {};
   currentFees.forEach(row => {
     totVol += row.units || 0;
     totRev += row.revenue || 0;
@@ -1409,7 +1603,7 @@ let mfrSortCol = 'net_revenue_eur';
 let mfrSortAsc = false;
 
 function renderManufacturerTable() {
-  if (selectedBrandSlug !== 'all') return;
+  if (selectedBrands.size === 1) return;  // only show manufacturer table for multi/all brand view
   const mfrs = allData.manufacturers || [];
   if (!mfrs.length) return;
 
@@ -1666,7 +1860,7 @@ function exportProductCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `recon_${selectedBrandSlug}_products_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `recon_${getSlugParam()}_products_${new Date().toISOString().slice(0,10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -1882,6 +2076,10 @@ function getCompareDates(fromStr, toStr) {
       cStart = isoDate(addYears(from, -1));
       cEnd = isoDate(addYears(to, -1));
       break;
+    case 'custom':
+      cStart = document.getElementById('dpCompFrom').value || fromStr;
+      cEnd = document.getElementById('dpCompTo').value || toStr;
+      break;
     default:
       cEnd = isoDate(addDays(from, -1));
       cStart = isoDate(addDays(from, -daySpan - 1));
@@ -1899,7 +2097,7 @@ function updateCompareInfo() {
 
 function updateTriggerText(from, to) {
   document.getElementById('dateTriggerText').textContent = fmtShort(from) + ' – ' + fmtShort(to);
-  const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year' };
+  const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year', custom:'vs custom period' };
   document.getElementById('dateTriggerCompare').textContent = dpCompareOn ? (cmpLabels[dpCompareMode] || '') : '';
 }
 
@@ -1967,6 +2165,9 @@ function setCompareMode(btn) {
   document.querySelectorAll('.compare-opt').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   dpCompareMode = btn.dataset.cmp;
+  // Show/hide custom date inputs
+  const customDates = document.getElementById('compareCustomDates');
+  customDates.style.display = dpCompareMode === 'custom' ? 'flex' : 'none';
   updateCompareInfo();
 }
 

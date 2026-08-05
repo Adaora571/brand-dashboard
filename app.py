@@ -240,9 +240,10 @@ MANUFACTURER_BQ_NAMES = {
     "montu":         "Montu",
     "novacana":      {
         "multi_source": True,
-        "manufacturers": ["Remexian"],          # all products from Remexian, all dates
+        "manufacturers": ["Remexian", "Novacana"],   # all products from Remexian or Novacana (as manufacturer)
         "include_category": "vape",             # all vapes...
         "exclude_vape_manufacturers": ["Four 20 Pharma", "Four 20 pharma"],  # ...except Curaleaf
+        "brand_names": ["Novacana"],            # auto-include any product with brand_name = "Novacana"
         # Per-product attribution with optional date cutoffs.
         # product_like: SQL LIKE pattern for oi.product_name
         # from_date (optional): only count orders from this date onward
@@ -252,6 +253,8 @@ MANUFACTURER_BQ_NAMES = {
             {"product_like": "Aleph Amber 22/1%", "from_date": "2026-05-01"},        # Mango Kush: from May (previously direct AlephSana)
             {"product_like": "Nice 33/1%"},                                           # Lotus Punch: 3rd party from Cansativa
             {"product_like": "HiDealz 24/1%"},                                       # Honeydew Haze: 3rd party from Remexian
+            {"product_like": "Gripon420 24/1%"},                                      # MAC-3: backup if brand field empty
+            {"product_like": "Kana Craft 30/1%"},                                     # Banana Cake: backup if brand field empty
         ],
     },
     "dunbar":        {"manufacturer": "AlephSana", "product_filter": "Kapseln"},
@@ -273,6 +276,9 @@ def mfg_clause(mfg_name):
     if mfg_name is None:
         return ("TRUE", [])
     if isinstance(mfg_name, dict):
+        # --- Multi-brand selection from recon dashboard (comma-separated slugs) ---
+        if mfg_name.get("__multi_slugs__"):
+            return resolve_multi_brand_mfg(mfg_name["__multi_slugs__"])
         # --- Multi-source: composite brand spanning multiple manufacturers + category + product rules ---
         if mfg_name.get("multi_source"):
             or_parts = []
@@ -296,7 +302,12 @@ def mfg_clause(mfg_name):
                 else:
                     or_parts.append(f"({CATEGORY_EXPR}) = @incl_cat")
                     params.append(bigquery.ScalarQueryParameter("incl_cat", "STRING", cat))
-            # 3) Per-product rules with optional date cutoffs
+            # 3) Brand-name attribution (e.g. any product with brand = "Novacana")
+            bnames = mfg_name.get("brand_names", [])
+            if bnames:
+                or_parts.append("oi.product_brand_name IN UNNEST(@brand_names)")
+                params.append(bigquery.ArrayQueryParameter("brand_names", "STRING", bnames))
+            # 4) Per-product rules with optional date cutoffs
             for i, pr in enumerate(mfg_name.get("product_rules", [])):
                 pname = f"@pr_{i}_name"
                 params.append(bigquery.ScalarQueryParameter(f"pr_{i}_name", "STRING", pr["product_like"]))
@@ -331,6 +342,87 @@ def mfg_clause(mfg_name):
         "oi.product_manufacturer_name = @mfg",
         [bigquery.ScalarQueryParameter("mfg", "STRING", mfg_name)],
     )
+
+
+def resolve_multi_brand_mfg(slugs: list[str]):
+    """Resolve a list of brand slugs into a combined mfg_name suitable for mfg_clause.
+
+    When multiple brands are selected on the recon dashboard, we need a single
+    WHERE clause that matches any of them. We build a combined OR clause with
+    uniquely-prefixed parameters to avoid name collisions.
+
+    Returns (where_sql, params) — same contract as mfg_clause.
+    """
+    if not slugs:
+        return ("TRUE", [])
+
+    or_parts = []
+    params = []
+
+    for idx, s in enumerate(slugs):
+        bqn = MANUFACTURER_BQ_NAMES.get(s)
+        if bqn is None:
+            continue
+
+        pfx = f"mb{idx}_"  # unique prefix per slug
+
+        if isinstance(bqn, str):
+            or_parts.append(f"oi.product_manufacturer_name = @{pfx}mfg")
+            params.append(bigquery.ScalarQueryParameter(f"{pfx}mfg", "STRING", bqn))
+        elif isinstance(bqn, list):
+            or_parts.append(f"oi.product_manufacturer_name IN UNNEST(@{pfx}mfgs)")
+            params.append(bigquery.ArrayQueryParameter(f"{pfx}mfgs", "STRING", bqn))
+        elif isinstance(bqn, dict) and bqn.get("multi_source"):
+            sub_parts = []
+            mfrs = bqn.get("manufacturers", [])
+            if mfrs:
+                sub_parts.append(f"oi.product_manufacturer_name IN UNNEST(@{pfx}mfgs)")
+                params.append(bigquery.ArrayQueryParameter(f"{pfx}mfgs", "STRING", mfrs))
+            cat = bqn.get("include_category")
+            excl = bqn.get("exclude_vape_manufacturers", [])
+            if cat:
+                if excl:
+                    sub_parts.append(
+                        f"(({CATEGORY_EXPR}) = @{pfx}cat"
+                        f" AND oi.product_manufacturer_name NOT IN UNNEST(@{pfx}excl))"
+                    )
+                    params.append(bigquery.ScalarQueryParameter(f"{pfx}cat", "STRING", cat))
+                    params.append(bigquery.ArrayQueryParameter(f"{pfx}excl", "STRING", excl))
+                else:
+                    sub_parts.append(f"({CATEGORY_EXPR}) = @{pfx}cat")
+                    params.append(bigquery.ScalarQueryParameter(f"{pfx}cat", "STRING", cat))
+            bnames = bqn.get("brand_names", [])
+            if bnames:
+                sub_parts.append(f"oi.product_brand_name IN UNNEST(@{pfx}brands)")
+                params.append(bigquery.ArrayQueryParameter(f"{pfx}brands", "STRING", bnames))
+            for j, pr in enumerate(bqn.get("product_rules", [])):
+                pn = f"@{pfx}pr{j}"
+                params.append(bigquery.ScalarQueryParameter(f"{pfx}pr{j}", "STRING", pr["product_like"]))
+                if pr.get("from_date"):
+                    sub_parts.append(f"(oi.product_name LIKE {pn} AND DATE(o.created_at) >= @{pfx}pr{j}d)")
+                    params.append(bigquery.ScalarQueryParameter(f"{pfx}pr{j}d", "DATE", pr["from_date"]))
+                else:
+                    sub_parts.append(f"oi.product_name LIKE {pn}")
+            if sub_parts:
+                or_parts.append("(" + " OR ".join(sub_parts) + ")")
+        elif isinstance(bqn, dict):
+            mfr = bqn.get("manufacturer")
+            if isinstance(mfr, list):
+                or_parts.append(f"oi.product_manufacturer_name IN UNNEST(@{pfx}mfgs)")
+                params.append(bigquery.ArrayQueryParameter(f"{pfx}mfgs", "STRING", mfr))
+            else:
+                sub = [f"oi.product_manufacturer_name = @{pfx}mfg"]
+                params.append(bigquery.ScalarQueryParameter(f"{pfx}mfg", "STRING", mfr))
+                pf = bqn.get("product_filter")
+                if pf:
+                    sub.append(f"LOWER(oi.product_name) LIKE LOWER(@{pfx}pf)")
+                    params.append(bigquery.ScalarQueryParameter(f"{pfx}pf", "STRING", f"%{pf}%"))
+                or_parts.append("(" + " AND ".join(sub) + ")")
+
+    if not or_parts:
+        return ("TRUE", [])
+    return ("(" + " OR ".join(or_parts) + ")", params)
+
 
 # ============================================================
 # ★ DEAL TERMS — EASY TO EDIT ★
@@ -549,8 +641,33 @@ _fee_cat_list = ", ".join(f"'{c}'" for c in FEE_ELIGIBLE_CATEGORIES)
 FEE_CAT_FILTER = f"({CATEGORY_EXPR}) IN ({_fee_cat_list})"
 
 
+def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, list]:
+    """Build category filter SQL clause + params from a (possibly comma-separated) category string.
+
+    Returns (sql_fragment, params) where sql_fragment is empty string if no filter,
+    or 'AND (<category_expr>) = @<param>' / 'AND (<category_expr>) IN UNNEST(@<param>s)'.
+    """
+    if not category:
+        return "", []
+    cats = [c.strip() for c in category.split(",") if c.strip()]
+    if len(cats) == 1:
+        return (
+            f"AND ({CATEGORY_EXPR}) = @{param_name}",
+            [bigquery.ScalarQueryParameter(param_name, "STRING", cats[0])],
+        )
+    arr_name = f"{param_name}s"
+    return (
+        f"AND ({CATEGORY_EXPR}) IN UNNEST(@{arr_name})",
+        [bigquery.ArrayQueryParameter(arr_name, "STRING", cats)],
+    )
+
+
 def date_params(start_date: str, end_date: str, category: str = ""):
-    """Build date + category filter SQL + params."""
+    """Build date + category filter SQL + params.
+
+    ``category`` may be a single value or comma-separated list.
+    A single value uses ``= @category``; multiple values use ``IN UNNEST(@categories)``.
+    """
     clauses, params = [], []
     if start_date:
         clauses.append("DATE(o.created_at) >= @start_date")
@@ -559,8 +676,13 @@ def date_params(start_date: str, end_date: str, category: str = ""):
         clauses.append("DATE(o.created_at) <= @end_date")
         params.append(bigquery.ScalarQueryParameter("end_date", "DATE", end_date))
     if category:
-        clauses.append(f"({CATEGORY_EXPR}) = @category")
-        params.append(bigquery.ScalarQueryParameter("category", "STRING", category))
+        cats = [c.strip() for c in category.split(",") if c.strip()]
+        if len(cats) == 1:
+            clauses.append(f"({CATEGORY_EXPR}) = @category")
+            params.append(bigquery.ScalarQueryParameter("category", "STRING", cats[0]))
+        else:
+            clauses.append(f"({CATEGORY_EXPR}) IN UNNEST(@categories)")
+            params.append(bigquery.ArrayQueryParameter("categories", "STRING", cats))
     where = (" AND " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
@@ -655,6 +777,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         return cached
 
     date_where, date_p = date_params(start_date, end_date, category)
+    cat_sql, _cat_p = _cat_filter_sql(category)  # standalone fragment for prev CTEs (params already in date_p)
 
     # If the frontend doesn't supply explicit compare dates, fall back to
     # the "previous period" logic (same-length window before start_date).
@@ -733,7 +856,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
         AND {compare_clause}
-        {f"AND ({CATEGORY_EXPR}) = @category" if category else ""}
+        {cat_sql}
     ),
     prev_repeat AS (
       SELECT
@@ -744,7 +867,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
         WHERE {mfg_where} {NET_ORDER_FILTER}
           AND {compare_clause}
-          {f"AND ({CATEGORY_EXPR}) = @category" if category else ""}
+          {cat_sql}
       ) prev_customers
       JOIN (
         SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS lifetime_orders
@@ -904,8 +1027,9 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
         extra_where += " AND oi.product_brand_name = @brand"
         extra_params.append(bigquery.ScalarQueryParameter("brand", "STRING", brand))
     if category:
-        extra_where += f" AND ({CATEGORY_EXPR}) = @category"
-        extra_params.append(bigquery.ScalarQueryParameter("category", "STRING", category))
+        cat_frag, cat_p = _cat_filter_sql(category)
+        extra_where += f" {cat_frag}"
+        extra_params.extend(cat_p)
     if origin:
         extra_where += " AND oi.product_country_or_origin = @origin"
         extra_params.append(bigquery.ScalarQueryParameter("origin", "STRING", origin))
@@ -914,6 +1038,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     SELECT
       oi.product_name,
       COALESCE(NULLIF(oi.product_brand_name, ''), oi.product_manufacturer_name) AS product_brand_name,
+      oi.product_manufacturer_name AS product_manufacturer_name,
       ({CATEGORY_EXPR}) AS category,
       oi.product_country_or_origin AS origin,
       COUNT(DISTINCT o.order_id) AS prescriptions,
@@ -925,7 +1050,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {extra_where} {NET_ORDER_FILTER}
-    GROUP BY 1,2,3,4
+    GROUP BY 1,2,3,4,5
     ORDER BY revenue_eur DESC
     """
     params = mfg_p + date_p + extra_params
@@ -935,7 +1060,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     _brand_prefixes = [
         ("A+ Kineo", "Kineo"), ("HiDealz", "Remexian Pharma"),
         ("Greenseal", "Remexian Pharma"), ("Aleph Amber", "AlephSana"),
-        ("Nice ", "Cansativa"),
+        ("Nice ", "Cansativa"), ("Gripon420", "Novacana"), ("Kana Craft", "Novacana"),
     ]
     for r in rows:
         if not r.get("product_brand_name"):
@@ -944,6 +1069,15 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
                 if pn.startswith(prefix):
                     r["product_brand_name"] = brand_name
                     break
+
+    # Novacana-specific: when brand_name == 'Novacana', display the manufacturer
+    # as the product line instead (so you see "Cansativa", "Remexian", etc.)
+    if slug == "novacana":
+        for r in rows:
+            if (r.get("product_brand_name") or "").lower() == "novacana":
+                mfr = r.get("product_manufacturer_name") or ""
+                if mfr:
+                    r["product_brand_name"] = mfr
 
     result = {"data": rows}
     cache_set(ck, result)
@@ -1075,6 +1209,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
         return cached
 
     date_where, date_p = date_params(start_date, end_date, category)
+    cat_sql, _ = _cat_filter_sql(category)  # SQL only; params already in date_p
     mfg_where, mfg_p = mfg_clause(mfg_name)
     base_params = mfg_p + date_p
 
@@ -1084,7 +1219,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
-        {f"AND ({CATEGORY_EXPR}) = @category" if category else ""}
+        {cat_sql}
       GROUP BY 1
     )
     SELECT
@@ -1223,20 +1358,18 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
     if cached:
         return cached
 
-    cat_filter = f"AND ({CATEGORY_EXPR}) = @category" if category else ""
+    cat_frag, cat_p = _cat_filter_sql(category)
     sql = f"""
     SELECT COUNT(DISTINCT o.order_id) AS total_rx
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
     WHERE DATE(o.created_at) >= DATE(@start) AND DATE(o.created_at) <= DATE(@end)
-      {NET_ORDER_FILTER} {cat_filter}
+      {NET_ORDER_FILTER} {cat_frag}
     """
     params = [
         bigquery.ScalarQueryParameter("start", "DATE", s),
         bigquery.ScalarQueryParameter("end", "DATE", e),
-    ]
-    if category:
-        params.append(bigquery.ScalarQueryParameter("category", "STRING", category))
+    ] + cat_p
 
     rows = run_query(sql, params)
     result = rows[0].get("total_rx", 0) if rows else 0
@@ -1292,15 +1425,37 @@ async def api_recon_combined(
     start: str = "", end: str = "", cstart: str = "", cend: str = "",
     category: str = "",
 ):
-    """Combined reconciliation endpoint — returns all data in one response."""
+    """Combined reconciliation endpoint — returns all data in one response.
+
+    ``slug`` may be:
+      - ``"all"``          → no manufacturer filter
+      - single slug        → one brand
+      - comma-separated    → multiple brands (multi-select)
+    ``category`` may also be comma-separated for multi-category.
+    """
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
+
+    # ── resolve brand slug(s) → mfg_name for query building ──
     if slug == "all":
         mfg_name = None  # No manufacturer filter — consolidated view
+        selected_slugs = []
+    elif "," in slug:
+        # Multi-brand selection
+        selected_slugs = [s.strip() for s in slug.split(",") if s.strip()]
+        invalid = [s for s in selected_slugs if s not in MANUFACTURER_BQ_NAMES]
+        if invalid:
+            raise HTTPException(status_code=404, detail=f"Brand(s) not found: {', '.join(invalid)}")
+        mfg_name = "__multi__"  # sentinel; we'll use resolve_multi_brand_mfg below
     elif slug not in MANUFACTURER_BQ_NAMES:
         raise HTTPException(status_code=404, detail="Brand not found")
     else:
         mfg_name = MANUFACTURER_BQ_NAMES[slug]
+        selected_slugs = [slug]
+
+    # For multi-brand selection, wrap slugs in a dict that mfg_clause understands
+    if mfg_name == "__multi__":
+        mfg_name = {"__multi_slugs__": selected_slugs}
 
     # Calculate comparison period dates for patient comparison
     s = start or "2020-01-01"
