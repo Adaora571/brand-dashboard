@@ -113,6 +113,14 @@
   }
   .compare-opt:hover { border-color:var(--accent); color:var(--accent); }
   .compare-opt.active { background:#dbeafe; border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .compare-custom-dates { display:flex; gap:10px; margin-top:10px; align-items:center; }
+  .compare-custom-dates label { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; min-width:30px; }
+  .compare-custom-dates input[type=date] {
+    flex:1; border:1px solid var(--border); border-radius:6px;
+    padding:6px 8px; font-size:11px; font-family:inherit; outline:none;
+    color:var(--text); background:#fff;
+  }
+  .compare-custom-dates input[type=date]:focus { border-color:var(--accent); box-shadow:0 0 0 2px rgba(5,137,211,0.1); }
   .date-panel-footer {
     display:flex; justify-content:flex-end; gap:8px;
     padding:12px 16px; border-top:1px solid var(--border);
@@ -294,6 +302,13 @@
               <button class="compare-opt" data-cmp="wow" onclick="setCompareMode(this)">WoW</button>
               <button class="compare-opt" data-cmp="dod" onclick="setCompareMode(this)">DoD</button>
               <button class="compare-opt" data-cmp="yoy" onclick="setCompareMode(this)">YoY</button>
+              <button class="compare-opt" data-cmp="custom" onclick="setCompareMode(this)">Custom</button>
+            </div>
+            <div class="compare-custom-dates" id="compareCustomDates" style="display:none;">
+              <label>From</label>
+              <input type="date" id="dpCompFrom" onchange="updateCompareInfo()">
+              <label>To</label>
+              <input type="date" id="dpCompTo" onchange="updateCompareInfo()">
             </div>
             <div class="compare-info" id="compareInfo">📊 Comparing to: <strong id="compareRangeText">—</strong></div>
           </div>
@@ -1213,6 +1228,8 @@ function setCompareMode(btn) {
   document.querySelectorAll('.compare-opt').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   dpCompareMode = btn.dataset.cmp;
+  const customDates = document.getElementById('compareCustomDates');
+  customDates.style.display = dpCompareMode === 'custom' ? 'flex' : 'none';
   updateCompareInfo();
 }
 
@@ -1248,6 +1265,10 @@ function getCompareDates(fromStr, toStr) {
       cStart = isoDate(addYears(from, -1));
       cEnd = isoDate(addYears(to, -1));
       break;
+    case 'custom':
+      cStart = document.getElementById('dpCompFrom').value || fromStr;
+      cEnd = document.getElementById('dpCompTo').value || toStr;
+      break;
     default:
       cEnd = isoDate(addDays(from, -1));
       cStart = isoDate(addDays(from, -daySpan - 1));
@@ -1266,7 +1287,7 @@ function updateCompareInfo() {
 function updateTriggerText(from, to) {
   const text = fmtShort(from) + ' – ' + fmtShort(to);
   document.getElementById('dateTriggerText').textContent = text;
-  const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year' };
+  const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year', custom:'vs custom' };
   document.getElementById('dateTriggerCompare').textContent = dpCompareOn ? (cmpLabels[dpCompareMode]||'') : '';
 }
 
