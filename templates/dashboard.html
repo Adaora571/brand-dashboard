@@ -1047,7 +1047,9 @@ function renderPatients(data) {
   const periods=[...new Set(nr.map(r=>r.period))].sort();
   const nd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='new')||{}).patient_count||0);
   const rd=periods.map(p=>(nr.find(r=>r.period===p&&r.patient_type==='returning')||{}).patient_count||0);
-  const newPatTotal=nd.reduce((a,b)=>a+b,0);
+  // Use totals for accurate headline (avoids cross-month double-counting)
+  const totals=data.new_returning_totals||[];
+  const newPatTotal=(totals.find(r=>r.patient_type==='new')||{}).patient_count||nd.reduce((a,b)=>a+b,0);
   document.getElementById('k-newpat').textContent=fmt(newPatTotal);
   createOrUpdate('chartPatients',{type:'bar',data:{labels:periods.map(fmtDate),datasets:[{label:'New',data:nd,backgroundColor:'#1a0a2e',borderColor:'#1a0a2e',borderWidth:1,stack:'a',datalabels:{display:true,anchor:'end',align:'top',font:{size:9},color:'#1e293b',formatter:v=>fmtLabelUnits(v)}},{label:'Returning',data:rd,backgroundColor:'#0589D350',borderColor:'#0589D3',borderWidth:1,stack:'a',datalabels:{display:false}}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true},y:{stacked:true}}}});
   const age=data.age_segments||[];
