@@ -1271,14 +1271,17 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     mfg_where, mfg_p = mfg_clause(mfg_name)
     base_params = mfg_p + date_p
 
-    nr_sql = f"""
+    fo_cte = f"""
     WITH first_order AS (
       SELECT o.customer_id, MIN(DATE(o.created_at)) AS first_date
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
       GROUP BY 1
-    )
+    )"""
+    # Per-period breakdown (used by brand dashboard monthly chart)
+    nr_sql = f"""
+    {fo_cte}
     SELECT
       FORMAT_DATE('%Y-%m', DATE(o.created_at)) AS period,
       IF(f.first_date >= @start_date AND f.first_date <= @end_date, 'new', 'returning') AS patient_type,
@@ -1292,6 +1295,22 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     JOIN first_order f ON o.customer_id = f.customer_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1,2 ORDER BY 1,2
+    """
+    # Overall totals (accurate unique counts, no cross-month double-counting)
+    nr_totals_sql = f"""
+    {fo_cte}
+    SELECT
+      IF(f.first_date >= @start_date AND f.first_date <= @end_date, 'new', 'returning') AS patient_type,
+      COUNT(DISTINCT o.customer_id) AS patient_count,
+      COUNT(DISTINCT o.order_id) AS order_count,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
+       - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
+       - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+    FROM `{PROJECT_DATASET}.order_items` oi
+    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    JOIN first_order f ON o.customer_id = f.customer_id
+    WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
+    GROUP BY 1 ORDER BY 1
     """
     age_sql = f"""
     SELECT
@@ -1320,14 +1339,16 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       AND TRIM(o.shipping_address.region) != ''
     GROUP BY 1 ORDER BY patient_count DESC LIMIT 15
     """
-    # Run all 3 queries in parallel instead of sequentially
-    nr, ages, regs = await asyncio.gather(
+    # Run all 4 queries in parallel
+    nr, nr_totals, ages, regs = await asyncio.gather(
         run_query_async(nr_sql, list(base_params)),
+        run_query_async(nr_totals_sql, list(base_params)),
         run_query_async(age_sql, list(base_params)),
         run_query_async(reg_sql, list(base_params)),
     )
     result = {
         "new_returning": nr,
+        "new_returning_totals": nr_totals,
         "age_segments": ages,
         "regions": regs,
     }
@@ -1728,8 +1749,8 @@ async def api_recon_combined(
         "gpx": r.get("avg_g_per_rx"),
     } for r in prod_data]
 
-    # Map patients (current period)
-    nr = patients.get("new_returning", [])
+    # Map patients (current period) — use totals for accurate unique counts
+    nr = patients.get("new_returning_totals", [])
     new_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "new")
     ret_total = sum(r["patient_count"] for r in nr if r.get("patient_type") == "returning")
     new_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr if r.get("patient_type") == "new")
@@ -1737,8 +1758,8 @@ async def api_recon_combined(
     new_orders = sum(r.get("order_count", 0) for r in nr if r.get("patient_type") == "new")
     ret_orders = sum(r.get("order_count", 0) for r in nr if r.get("patient_type") == "returning")
 
-    # Map patients (previous period for comparison)
-    nr_prev = patients_prev.get("new_returning", [])
+    # Map patients (previous period for comparison) — use totals
+    nr_prev = patients_prev.get("new_returning_totals", [])
     prev_new = sum(r["patient_count"] for r in nr_prev if r.get("patient_type") == "new")
     prev_ret = sum(r["patient_count"] for r in nr_prev if r.get("patient_type") == "returning")
     prev_new_rev = sum(float(r.get("net_revenue_eur") or 0) for r in nr_prev if r.get("patient_type") == "new")
