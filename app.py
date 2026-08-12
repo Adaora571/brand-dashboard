@@ -1277,7 +1277,6 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
-        {cat_sql} {pl_sql}
       GROUP BY 1
     )
     SELECT
