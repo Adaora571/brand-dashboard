@@ -1890,7 +1890,7 @@ async def api_recon_categories(request: Request, slug: str):
 # ============================================================
 @app.get("/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    return {"status": "ok", "timestamp": datetime.now().isoformat(), "version": "v2-totals-fix"}
 
 
 @app.get("/api/data-freshness")
