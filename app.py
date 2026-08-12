@@ -1281,7 +1281,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     )
     SELECT
       FORMAT_DATE('%Y-%m', DATE(o.created_at)) AS period,
-      IF(DATE(o.created_at) = f.first_date, 'new', 'returning') AS patient_type,
+      IF(f.first_date >= @start_date AND f.first_date <= @end_date, 'new', 'returning') AS patient_type,
       COUNT(DISTINCT o.customer_id) AS patient_count,
       COUNT(DISTINCT o.order_id) AS order_count,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
