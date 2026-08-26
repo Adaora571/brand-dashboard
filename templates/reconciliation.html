@@ -77,6 +77,12 @@
     color:var(--text); background:#fff;
   }
   .date-row input[type=date]:focus { border-color:var(--accent); box-shadow:0 0 0 2px rgba(5,137,211,0.1); }
+  .date-row input[type=time] {
+    border:1px solid var(--border); border-radius:6px;
+    padding:8px 10px; font-size:12px; font-family:inherit; outline:none;
+    color:var(--text); background:#fff;
+  }
+  .date-row input[type=time]:focus { border-color:var(--accent); box-shadow:0 0 0 2px rgba(5,137,211,0.1); }
   .compare-section { border-top:1px solid var(--border); padding-top:14px; margin-top:6px; }
   .compare-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
   .compare-toggle {
@@ -316,6 +322,7 @@
         <div class="ms-options" id="collectionOptions">
           <label class="ms-opt ms-all"><input type="radio" name="collectionOpt" checked onchange="setCollection('')"><span>All Collections</span></label>
           <label class="ms-opt"><input type="radio" name="collectionOpt" onchange="setCollection('super-value')"><span>Super Value</span></label>
+          <label class="ms-opt"><input type="radio" name="collectionOpt" onchange="setCollection('excl-super-value')"><span>All except Super Value</span></label>
         </div>
       </div>
     </div>
@@ -347,10 +354,12 @@
           <div class="date-row">
             <label>From</label>
             <input type="date" id="dpFrom">
+            <input type="time" id="dpFromTime" value="00:00" title="Start time (Berlin)" style="max-width:110px;">
           </div>
           <div class="date-row">
             <label>To</label>
             <input type="date" id="dpTo">
+            <input type="time" id="dpToTime" value="23:59" title="End time (Berlin)" style="max-width:110px;">
           </div>
           <div class="compare-section">
             <div class="compare-header">
@@ -384,6 +393,8 @@
     <!-- Hidden inputs for dates -->
     <input type="hidden" id="startDate" value="2026-01-01">
     <input type="hidden" id="endDate" value="2026-03-13">
+    <input type="hidden" id="startTime" value="00:00">
+    <input type="hidden" id="endTime" value="23:59">
     <input type="hidden" id="compareStart" value="">
     <input type="hidden" id="compareEnd" value="">
   </div>
@@ -732,8 +743,8 @@ function toggleCollectionPanel() {
 
 function setCollection(val) {
   selectedCollection = val;
-  document.getElementById('collectionTrigger').textContent =
-    val === 'super-value' ? 'Super Value' : 'All Collections';
+  const labels = { 'super-value': 'Super Value', 'excl-super-value': 'Excl. Super Value' };
+  document.getElementById('collectionTrigger').textContent = labels[val] || 'All Collections';
   document.getElementById('collectionPanel').classList.remove('open');
   onFilterChange(false);
 }
@@ -963,6 +974,9 @@ async function loadAll() {
   if (cat) url += `&category=${encodeURIComponent(cat)}`;
   if (selectedCollection) url += `&collection=${encodeURIComponent(selectedCollection)}`;
   if (selectedProductLine) url += `&product_line=${encodeURIComponent(selectedProductLine)}`;
+  const _st = document.getElementById('startTime')?.value || '00:00';
+  const _et = document.getElementById('endTime')?.value || '23:59';
+  if (!(_st === '00:00' && _et === '23:59')) url += `&stime=${encodeURIComponent(_st)}&etime=${encodeURIComponent(_et)}`;
 
   try {
     const resp = await fetch(url);
@@ -2095,6 +2109,8 @@ function toggleDatePanel() {
   } else {
     document.getElementById('dpFrom').value = document.getElementById('startDate').value;
     document.getElementById('dpTo').value = document.getElementById('endDate').value;
+    document.getElementById('dpFromTime').value = document.getElementById('startTime').value || '00:00';
+    document.getElementById('dpToTime').value = document.getElementById('endTime').value || '23:59';
     updateCompareInfo();
     panel.classList.add('open');
   }
@@ -2111,6 +2127,8 @@ function applyDatePanel() {
 
   document.getElementById('startDate').value = from;
   document.getElementById('endDate').value = to;
+  document.getElementById('startTime').value = document.getElementById('dpFromTime').value || '00:00';
+  document.getElementById('endTime').value = document.getElementById('dpToTime').value || '23:59';
 
   const cmp = getCompareDates(from, to);
   document.getElementById('compareStart').value = dpCompareOn ? cmp.start : '';
@@ -2168,7 +2186,12 @@ function updateCompareInfo() {
 }
 
 function updateTriggerText(from, to) {
-  document.getElementById('dateTriggerText').textContent = fmtShort(from) + ' – ' + fmtShort(to);
+  const st = document.getElementById('startTime')?.value || '00:00';
+  const et = document.getElementById('endTime')?.value || '23:59';
+  const hasTime = !(st === '00:00' && et === '23:59');
+  document.getElementById('dateTriggerText').textContent = hasTime
+    ? `${fmtShort(from)}, ${st} – ${fmtShort(to)}, ${et}`
+    : fmtShort(from) + ' – ' + fmtShort(to);
   const cmpLabels = { prev:'vs prev period', mom:'vs prev month', wow:'vs prev week', dod:'vs prev day', yoy:'vs prev year', custom:'vs custom period' };
   document.getElementById('dateTriggerCompare').textContent = dpCompareOn ? (cmpLabels[dpCompareMode] || '') : '';
 }
@@ -2230,6 +2253,8 @@ function selectPreset(btn) {
 
   document.getElementById('dpFrom').value = from;
   document.getElementById('dpTo').value = to;
+  document.getElementById('dpFromTime').value = '00:00';
+  document.getElementById('dpToTime').value = '23:59';
   updateCompareInfo();
 }
 

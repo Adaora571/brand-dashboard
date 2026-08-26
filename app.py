@@ -6,7 +6,7 @@ Queries BigQuery live data and serves per-manufacturer dashboards.
   edit the MANUFACTURER_FEES dict below. No other code changes needed.
 """
 
-import os, json, hashlib, hmac, logging, asyncio, time, secrets
+import os, json, hashlib, hmac, logging, asyncio, time, secrets, re
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -646,10 +646,12 @@ FEE_CAT_FILTER = f"({CATEGORY_EXPR}) IN ({_fee_cat_list})"
 # between €2 and €4 (exclusive), excluding "Rezept" items.
 # Membership is resolved live from the Shopify source tables (latest
 # sync snapshot per product/variant), so the filter stays in sync with
-# the shop when prices or the assortment change.
+# the shop when prices or the assortment change. Matching is by
+# product_id (rename-proof), with the datamart's 'flower' vertical as
+# the flower condition.
 _SOURCE_SHOPIFY_DATASET = PROJECT_DATASET.split(".")[0] + ".source_shopify"
-SUPER_VALUE_TITLES_SQL = f"""
-      SELECT DISTINCT p.title
+SUPER_VALUE_IDS_SQL = f"""
+      SELECT DISTINCT CAST(p.id AS STRING)
       FROM (SELECT * FROM `{_SOURCE_SHOPIFY_DATASET}.products`
             QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) p
       JOIN (SELECT * FROM `{_SOURCE_SHOPIFY_DATASET}.product_variants`
@@ -660,22 +662,65 @@ SUPER_VALUE_TITLES_SQL = f"""
         AND SAFE_CAST(v.price AS FLOAT64) < 4
         AND p.title NOT LIKE '%Rezept%'"""
 
-# Internal token used on the wire: the recon frontend sends
-# collection=super-value, which is folded into the category parameter as
-# this token so the existing filter pipeline applies it everywhere.
+# Internal tokens used on the wire: the recon frontend sends
+# collection=super-value (or excl-super-value), which is folded into the
+# category parameter as these tokens so the existing filter pipeline
+# applies them everywhere.
 SUPER_VALUE_TOKEN = "__super_value__"
+SUPER_VALUE_EXCL_TOKEN = "__excl_super_value__"
 SUPER_VALUE_FILTER_EXPR = (
-    f"(({CATEGORY_EXPR}) = 'flower' AND oi.product_name IN ({SUPER_VALUE_TITLES_SQL}))"
+    f"(({CATEGORY_EXPR}) = 'flower' AND oi.product_id IN ({SUPER_VALUE_IDS_SQL}))"
 )
+SUPER_VALUE_EXCLUDE_EXPR = f"(NOT {SUPER_VALUE_FILTER_EXPR})"
 
 
-def _split_category_param(category: str) -> tuple[list, bool]:
+def _split_category_param(category: str) -> tuple[list, bool, bool]:
     """Split a (possibly comma-separated) category string into plain
-    categories and a flag for the Super Value collection token."""
+    categories plus flags for the Super Value / Excl. Super Value tokens."""
     cats = [c.strip() for c in category.split(",") if c.strip()]
     super_value = SUPER_VALUE_TOKEN in cats
-    cats = [c for c in cats if c != SUPER_VALUE_TOKEN]
-    return cats, super_value
+    super_value_excl = SUPER_VALUE_EXCL_TOKEN in cats
+    cats = [c for c in cats if c not in (SUPER_VALUE_TOKEN, SUPER_VALUE_EXCL_TOKEN)]
+    return cats, super_value, super_value_excl
+
+
+# ── Canonical product names ──────────────────────────────────
+# Products get renamed in Shopify; order_items keeps the name at order
+# time, which splits one product into several rows. We therefore group
+# by product_id and display the CURRENT Shopify title (latest sync
+# snapshot), so any future rename automatically folds all history into
+# the updated name. A " | Nur Rezept" suffix is stripped so Rezept-only
+# duplicates merge with their base product when the names align, and
+# PRODUCT_NAME_OVERRIDES allows explicit manual merges (key = the name
+# as it would be displayed, value = the name to merge it into).
+CANON_PRODUCTS_CTE = f"""canon_products AS (
+      SELECT CAST(id AS STRING) AS product_id, title AS current_title
+      FROM `{_SOURCE_SHOPIFY_DATASET}.products`
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
+    )"""
+
+PRODUCT_NAME_OVERRIDES: dict = {
+    # "Old or duplicate display name": "Name to merge into",
+}
+
+
+def _canonical_name_expr() -> str:
+    """SQL expression for the canonical product name. Requires the query
+    to LEFT JOIN canon_products cn ON cn.product_id = oi.product_id."""
+    base = "COALESCE(cn.current_title, oi.product_name)"
+    base = f"REGEXP_REPLACE({base}, r'\\s*\\|\\s*Nur Rezept$', '')"
+    if PRODUCT_NAME_OVERRIDES:
+        def esc(s: str) -> str:
+            return s.replace("\\", "\\\\").replace("'", "\\'")
+        whens = " ".join(
+            f"WHEN {base} = '{esc(k)}' THEN '{esc(v)}'"
+            for k, v in PRODUCT_NAME_OVERRIDES.items()
+        )
+        return f"(CASE {whens} ELSE {base} END)"
+    return f"({base})"
+
+
+CANONICAL_NAME_EXPR = _canonical_name_expr()
 
 
 def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, list]:
@@ -686,7 +731,7 @@ def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, l
     """
     if not category:
         return "", []
-    cats, super_value = _split_category_param(category)
+    cats, super_value, super_value_excl = _split_category_param(category)
     frags, params = [], []
     if len(cats) == 1:
         frags.append(f"AND ({CATEGORY_EXPR}) = @{param_name}")
@@ -697,6 +742,8 @@ def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, l
         params.append(bigquery.ArrayQueryParameter(arr_name, "STRING", cats))
     if super_value:
         frags.append(f"AND {SUPER_VALUE_FILTER_EXPR}")
+    if super_value_excl:
+        frags.append(f"AND {SUPER_VALUE_EXCLUDE_EXPR}")
     return " ".join(frags), params
 
 
@@ -739,21 +786,36 @@ def _slug_has_novacana(slug: str) -> bool:
     return "novacana" in [s.strip() for s in slug.split(",")]
 
 
-def date_params(start_date: str, end_date: str, category: str = "", product_line: str = "", is_novacana: bool = False):
+def date_params(start_date: str, end_date: str, category: str = "", product_line: str = "", is_novacana: bool = False,
+                start_time: str = "", end_time: str = ""):
     """Build date + category + product_line filter SQL + params.
 
     ``category`` may be a single value or comma-separated list.
     ``product_line`` filters by product_brand_name (+ manufacturer for Novacana).
+    ``start_time``/``end_time`` ("HH:MM", Europe/Berlin) optionally narrow the
+    range to a time-of-day window (Shopify-style). Without them the legacy
+    whole-day DATE() boundaries apply unchanged.
     """
     clauses, params = [], []
     if start_date:
-        clauses.append("DATE(o.created_at) >= @start_date")
         params.append(bigquery.ScalarQueryParameter("start_date", "DATE", start_date))
+        if start_time:
+            # Loose DATE guard keeps partition pruning; the precise bound is the timestamp.
+            clauses.append("DATE(o.created_at) >= DATE_SUB(@start_date, INTERVAL 1 DAY)")
+            clauses.append("o.created_at >= TIMESTAMP(DATETIME(@start_date, @start_time), 'Europe/Berlin')")
+            params.append(bigquery.ScalarQueryParameter("start_time", "TIME", start_time + ":00"))
+        else:
+            clauses.append("DATE(o.created_at) >= @start_date")
     if end_date:
-        clauses.append("DATE(o.created_at) <= @end_date")
         params.append(bigquery.ScalarQueryParameter("end_date", "DATE", end_date))
+        if end_time:
+            clauses.append("DATE(o.created_at) <= DATE_ADD(@end_date, INTERVAL 1 DAY)")
+            clauses.append("o.created_at <= TIMESTAMP(DATETIME(@end_date, @end_time), 'Europe/Berlin')")
+            params.append(bigquery.ScalarQueryParameter("end_time", "TIME", end_time + ":59"))
+        else:
+            clauses.append("DATE(o.created_at) <= @end_date")
     if category:
-        cats, super_value = _split_category_param(category)
+        cats, super_value, super_value_excl = _split_category_param(category)
         if len(cats) == 1:
             clauses.append(f"({CATEGORY_EXPR}) = @category")
             params.append(bigquery.ScalarQueryParameter("category", "STRING", cats[0]))
@@ -762,6 +824,8 @@ def date_params(start_date: str, end_date: str, category: str = "", product_line
             params.append(bigquery.ArrayQueryParameter("categories", "STRING", cats))
         if super_value:
             clauses.append(SUPER_VALUE_FILTER_EXPR)
+        if super_value_excl:
+            clauses.append(SUPER_VALUE_EXCLUDE_EXPR)
     if product_line:
         pl_sql, pl_p = _product_line_sql(product_line, is_novacana=is_novacana)
         # pl_sql starts with "AND", strip it for clauses list
@@ -851,18 +915,19 @@ async def brand_logout(request: Request, hashed_slug: str):
 # ============================================================
 async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
     category: str = "", compare_start: str = "", compare_end: str = "",
-    product_line: str = ""):
+    product_line: str = "", start_time: str = "", end_time: str = ""):
     """Internal helper for summary query, used by both brand and recon APIs."""
 
     # Check cache first
     ck = cache_key("summary", slug=slug, s=start_date, e=end_date, cat=category,
-                   cs=compare_start, ce=compare_end, pl=product_line)
+                   cs=compare_start, ce=compare_end, pl=product_line, st=start_time, et=end_time)
     cached = cache_get(ck)
     if cached:
         return cached
 
     _nova = _slug_has_novacana(slug)
-    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
+                                     start_time=start_time, end_time=end_time)
     cat_sql, _cat_p = _cat_filter_sql(category)  # standalone fragment for prev CTEs (params already in date_p)
     pl_sql, _pl_p = _product_line_sql(product_line, is_novacana=_nova)  # standalone fragment for prev CTEs
 
@@ -877,6 +942,15 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     if cs and ce:
         # Frontend sent explicit comparison dates
         compare_clause = "DATE(o.created_at) >= DATE(@comp_start) AND DATE(o.created_at) <= DATE(@comp_end)"
+        if start_time and end_time:
+            # Apply the same time-of-day window to the comparison period
+            # (@start_time/@end_time params are supplied via date_params).
+            compare_clause = (
+                "o.created_at >= TIMESTAMP(DATETIME(@comp_start, @start_time), 'Europe/Berlin') "
+                "AND o.created_at <= TIMESTAMP(DATETIME(@comp_end, @end_time), 'Europe/Berlin') "
+                "AND DATE(o.created_at) >= DATE_SUB(DATE(@comp_start), INTERVAL 1 DAY) "
+                "AND DATE(o.created_at) <= DATE_ADD(DATE(@comp_end), INTERVAL 1 DAY)"
+            )
     else:
         # Default: mirror-length window right before the current start
         compare_clause = (
@@ -1043,16 +1117,17 @@ async def api_summary(
 # API: Monthly Trends (Helper)
 # ============================================================
 async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
     """Internal helper for trends query, used by both brand and recon APIs."""
 
-    ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
+    ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
     cached = cache_get(ck)
     if cached:
         return cached
 
     _nova = _slug_has_novacana(slug)
-    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
+                                     start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
@@ -1096,17 +1171,19 @@ async def api_trends(request: Request, hashed_slug: str, start_date: str = "", e
 # ============================================================
 async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
     region: str = "", brand: str = "", category: str = "", origin: str = "",
-    product_line: str = ""):
+    product_line: str = "", start_time: str = "", end_time: str = ""):
     """Internal helper for products query, used by both brand and recon APIs."""
 
     ck = cache_key("products", slug=slug, s=start_date, e=end_date,
-                   region=region, brand=brand, category=category, origin=origin, pl=product_line)
+                   region=region, brand=brand, category=category, origin=origin, pl=product_line,
+                   st=start_time, et=end_time)
     cached = cache_get(ck)
     if cached:
         return cached
 
     _nova = _slug_has_novacana(slug)
-    date_where, date_p = date_params(start_date, end_date, product_line=product_line, is_novacana=_nova)
+    date_where, date_p = date_params(start_date, end_date, product_line=product_line, is_novacana=_nova,
+                                     start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     extra_where = ""
@@ -1127,10 +1204,11 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
         extra_params.append(bigquery.ScalarQueryParameter("origin", "STRING", origin))
 
     sql = f"""
+    WITH {CANON_PRODUCTS_CTE}
     SELECT
-      oi.product_name,
-      oi.product_brand_name,
-      oi.product_manufacturer_name AS product_manufacturer_name,
+      {CANONICAL_NAME_EXPR} AS product_name,
+      MAX(oi.product_brand_name) AS product_brand_name,
+      MAX(oi.product_manufacturer_name) AS product_manufacturer_name,
       ({CATEGORY_EXPR}) AS category,
       oi.product_country_or_origin AS origin,
       COUNT(DISTINCT o.order_id) AS prescriptions,
@@ -1141,8 +1219,9 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
       SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_rx
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    LEFT JOIN canon_products cn ON cn.product_id = oi.product_id
     WHERE {mfg_where} {date_where} {extra_where} {NET_ORDER_FILTER}
-    GROUP BY 1,2,3,4,5
+    GROUP BY 1,4,5
     ORDER BY revenue_eur DESC
     """
     params = mfg_p + date_p + extra_params
@@ -1191,17 +1270,18 @@ async def api_products(
 # API: Breakdowns (category, origin, price tier, products/order, brand) (Helper)
 # ============================================================
 async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
     """Internal helper for breakdowns query, used by both brand and recon APIs."""
 
     # Check cache first
-    ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
+    ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
     cached = cache_get(ck)
     if cached:
         return cached
 
     _nova = _slug_has_novacana(slug)
-    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
+                                     start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
     base_params = mfg_p + date_p
 
@@ -1296,16 +1376,17 @@ async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "
 # API: Patient Insights (Helper)
 # ============================================================
 async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
     """Internal helper for patients query, used by both brand and recon APIs."""
 
-    ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
+    ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
     cached = cache_get(ck)
     if cached:
         return cached
 
     _nova = _slug_has_novacana(slug)
-    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
+                                     start_time=start_time, end_time=end_time)
     cat_sql, _ = _cat_filter_sql(category)  # SQL only; params already in date_p
     pl_sql, _ = _product_line_sql(product_line, is_novacana=_nova)  # SQL only; params already in date_p
     mfg_where, mfg_p = mfg_clause(mfg_name)
@@ -1407,16 +1488,17 @@ async def api_patients(request: Request, hashed_slug: str, start_date: str = "",
 # API: Pricing (Avg €/g over time) (Helper)
 # ============================================================
 async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
     """Internal helper for pricing query, used by both brand and recon APIs."""
 
-    ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line)
+    ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
     cached = cache_get(ck)
     if cached:
         return cached
 
     _nova = _slug_has_novacana(slug)
-    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova)
+    date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
+                                     start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
 
     sql = f"""
@@ -1470,28 +1552,43 @@ async def api_categories(request: Request, hashed_slug: str):
 # MARKET SHARE HELPER (used by reconciliation dashboard)
 # ============================================================
 async def _get_platform_total_rx(start_date: str = "", end_date: str = "", category: str = "",
-    product_line: str = ""):
+    product_line: str = "", start_time: str = "", end_time: str = ""):
     """Get total prescriptions across ALL manufacturers on the platform."""
     s = start_date or "2020-01-01"
     e = end_date or datetime.now().strftime("%Y-%m-%d")
-    ck = cache_key("platform_total", s=s, e=e, cat=category, pl=product_line)
+    ck = cache_key("platform_total", s=s, e=e, cat=category, pl=product_line, st=start_time, et=end_time)
     cached = cache_get(ck)
     if cached:
         return cached
 
     cat_frag, cat_p = _cat_filter_sql(category)
     pl_frag, pl_p = _product_line_sql(product_line)
+    if start_time and end_time:
+        # Time window set: loose DATE guard (partition pruning) + precise Berlin timestamps
+        date_clause = (
+            "DATE(o.created_at) >= DATE_SUB(DATE(@start), INTERVAL 1 DAY) "
+            "AND DATE(o.created_at) <= DATE_ADD(DATE(@end), INTERVAL 1 DAY) "
+            "AND o.created_at >= TIMESTAMP(DATETIME(DATE(@start), @stime), 'Europe/Berlin') "
+            "AND o.created_at <= TIMESTAMP(DATETIME(DATE(@end), @etime), 'Europe/Berlin')"
+        )
+        time_p = [
+            bigquery.ScalarQueryParameter("stime", "TIME", start_time + ":00"),
+            bigquery.ScalarQueryParameter("etime", "TIME", end_time + ":59"),
+        ]
+    else:
+        date_clause = "DATE(o.created_at) >= DATE(@start) AND DATE(o.created_at) <= DATE(@end)"
+        time_p = []
     sql = f"""
     SELECT COUNT(DISTINCT o.order_id) AS total_rx
     FROM `{PROJECT_DATASET}.order_items` oi
     JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE DATE(o.created_at) >= DATE(@start) AND DATE(o.created_at) <= DATE(@end)
+    WHERE {date_clause}
       {NET_ORDER_FILTER} {cat_frag} {pl_frag}
     """
     params = [
         bigquery.ScalarQueryParameter("start", "DATE", s),
         bigquery.ScalarQueryParameter("end", "DATE", e),
-    ] + cat_p + pl_p
+    ] + time_p + cat_p + pl_p
 
     rows = run_query(sql, params)
     result = rows[0].get("total_rx", 0) if rows else 0
@@ -1546,6 +1643,7 @@ async def api_recon_combined(
     request: Request, slug: str,
     start: str = "", end: str = "", cstart: str = "", cend: str = "",
     category: str = "", product_line: str = "", collection: str = "",
+    stime: str = "", etime: str = "",
 ):
     """Combined reconciliation endpoint — returns all data in one response.
 
@@ -1557,7 +1655,11 @@ async def api_recon_combined(
     ``product_line`` filters by product_brand_name (affects all KPIs/charts).
     ``collection`` — optional collection filter; ``super-value`` restricts all
     figures to the "Blüten für unter 4 €" Shopify collection (shown as
-    "Super Value" in the menu).
+    "Super Value" in the menu); ``excl-super-value`` shows everything BUT
+    that collection.
+    ``stime``/``etime`` — optional "HH:MM" time-of-day window (Europe/Berlin)
+    applied to the date range, Shopify-style. The default 00:00/23:59 pair
+    is treated as "whole days" (legacy behaviour).
     """
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
@@ -1566,6 +1668,15 @@ async def api_recon_combined(
     # KPI, chart and table picks it up without further plumbing.
     if collection in ("super-value", "super_value"):
         category = f"{category},{SUPER_VALUE_TOKEN}" if category else SUPER_VALUE_TOKEN
+    elif collection in ("excl-super-value", "exclude-super-value", "excl_super_value"):
+        category = f"{category},{SUPER_VALUE_EXCL_TOKEN}" if category else SUPER_VALUE_EXCL_TOKEN
+
+    # Sanitize the optional time window; whole-day defaults mean "no time filter"
+    _t_re = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+    if not (_t_re.match(stime or "") and _t_re.match(etime or "")):
+        stime, etime = "", ""
+    elif (stime, etime) == ("00:00", "23:59"):
+        stime, etime = "", ""
 
     # ── resolve brand slug(s) → mfg_name for query building ──
     if slug == "all":
@@ -1604,14 +1715,14 @@ async def api_recon_combined(
     # Run all queries in parallel (including platform total for market share)
     pl = product_line
     summary, trends, products, breakdowns, patients, patients_prev, pricing, platform_rx = await asyncio.gather(
-        _get_summary(mfg_name, slug, start, end, category, cstart, cend, product_line=pl),
-        _get_trends(mfg_name, slug, start, end, category, product_line=pl),
-        _get_products(mfg_name, slug, start, end, category=category, product_line=pl),
-        _get_breakdowns(mfg_name, slug, start, end, category, product_line=pl),
-        _get_patients(mfg_name, slug, start, end, category, product_line=pl),
-        _get_patients(mfg_name, slug, comp_s, comp_e, category, product_line=pl),
-        _get_pricing(mfg_name, slug, start, end, category, product_line=pl),
-        _get_platform_total_rx(start, end, category, product_line=pl),
+        _get_summary(mfg_name, slug, start, end, category, cstart, cend, product_line=pl, start_time=stime, end_time=etime),
+        _get_trends(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
+        _get_products(mfg_name, slug, start, end, category=category, product_line=pl, start_time=stime, end_time=etime),
+        _get_breakdowns(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
+        _get_patients(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
+        _get_patients(mfg_name, slug, comp_s, comp_e, category, product_line=pl, start_time=stime, end_time=etime),
+        _get_pricing(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
+        _get_platform_total_rx(start, end, category, product_line=pl, start_time=stime, end_time=etime),
     )
 
     # Map summary → kpi / kpi_compare
