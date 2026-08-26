@@ -1890,7 +1890,24 @@ async def api_recon_categories(request: Request, slug: str):
 # ============================================================
 @app.get("/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.now().isoformat(), "version": "v2-totals-fix"}
+    return {"status": "ok", "timestamp": datetime.now().isoformat(), "version": "v3-schema-debug"}
+
+
+@app.get("/api/debug/schema")
+async def debug_schema(request: Request, search: str = ""):
+    """TEMP: Explore dataset schema. Lists tables + columns matching `search`. Requires recon auth."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    project, dataset = PROJECT_DATASET.split(".", 1)
+    cols_sql = f"""
+    SELECT table_name, column_name, data_type
+    FROM `{project}.{dataset}.INFORMATION_SCHEMA.COLUMNS`
+    {"WHERE LOWER(column_name) LIKE LOWER(@search)" if search else ""}
+    ORDER BY table_name, ordinal_position
+    """
+    params = [bigquery.ScalarQueryParameter("search", "STRING", f"%{search}%")] if search else []
+    cols = await run_query_async(cols_sql, params)
+    return {"dataset": PROJECT_DATASET, "columns": cols}
 
 
 @app.get("/api/data-freshness")
