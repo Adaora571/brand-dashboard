@@ -309,6 +309,17 @@
       </div>
     </div>
 
+    <!-- Collection dropdown (Super Value) -->
+    <div class="ms-dropdown" id="collectionDropdown">
+      <div class="ms-trigger" id="collectionTrigger" onclick="toggleCollectionPanel()">All Collections</div>
+      <div class="ms-panel" id="collectionPanel">
+        <div class="ms-options" id="collectionOptions">
+          <label class="ms-opt ms-all"><input type="radio" name="collectionOpt" checked onchange="setCollection('')"><span>All Collections</span></label>
+          <label class="ms-opt"><input type="radio" name="collectionOpt" onchange="setCollection('super-value')"><span>Super Value</span></label>
+        </div>
+      </div>
+    </div>
+
     <button class="date-trigger" id="dateTrigger" onclick="toggleDatePanel()">
       <span class="date-icon">📅</span>
       <span class="date-text" id="dateTriggerText">Jan 1 – Mar 13, 2026</span>
@@ -692,6 +703,7 @@ function getProRatedTarget(slug, startStr, endStr) {
 // State
 let selectedBrands = new Set();    // empty = "all brands"
 let selectedCategories = new Set(); // empty = "all categories"
+let selectedCollection = '';        // '' = all, 'super-value' = Super Value collection
 let selectedProductLine = '';       // page-level product line filter
 let cachedProductLines = [];        // full list of product lines (cached from unfiltered load)
 let allData = {};
@@ -708,6 +720,22 @@ function getSlugParam() {
 function getCategoryParam() {
   if (selectedCategories.size === 0) return '';
   return [...selectedCategories].join(',');
+}
+
+// ── Collection dropdown (Super Value) ──
+function toggleCollectionPanel() {
+  const panel = document.getElementById('collectionPanel');
+  const isOpen = panel.classList.contains('open');
+  document.querySelectorAll('.ms-panel').forEach(p => p.classList.remove('open'));
+  if (!isOpen) panel.classList.add('open');
+}
+
+function setCollection(val) {
+  selectedCollection = val;
+  document.getElementById('collectionTrigger').textContent =
+    val === 'super-value' ? 'Super Value' : 'All Collections';
+  document.getElementById('collectionPanel').classList.remove('open');
+  onFilterChange(false);
 }
 
 // ── Multi-select dropdown component ──
@@ -933,6 +961,7 @@ async function loadAll() {
   const slugParam = getSlugParam();
   let url = `/api/recon/${slugParam}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}`;
   if (cat) url += `&category=${encodeURIComponent(cat)}`;
+  if (selectedCollection) url += `&collection=${encodeURIComponent(selectedCollection)}`;
   if (selectedProductLine) url += `&product_line=${encodeURIComponent(selectedProductLine)}`;
 
   try {

@@ -640,6 +640,43 @@ FEE_ELIGIBLE_CATEGORIES = ("flower", "extract")
 _fee_cat_list = ", ".join(f"'{c}'" for c in FEE_ELIGIBLE_CATEGORIES)
 FEE_CAT_FILTER = f"({CATEGORY_EXPR}) IN ({_fee_cat_list})"
 
+# ── "Super Value" collection filter ──────────────────────────
+# Mirrors the Shopify smart collection "Blüten für unter 4 €"
+# (id 698133348687): ACTIVE flower products with a variant priced
+# between €2 and €4 (exclusive), excluding "Rezept" items.
+# Membership is resolved live from the Shopify source tables (latest
+# sync snapshot per product/variant), so the filter stays in sync with
+# the shop when prices or the assortment change.
+_SOURCE_SHOPIFY_DATASET = PROJECT_DATASET.split(".")[0] + ".source_shopify"
+SUPER_VALUE_TITLES_SQL = f"""
+      SELECT DISTINCT p.title
+      FROM (SELECT * FROM `{_SOURCE_SHOPIFY_DATASET}.products`
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) p
+      JOIN (SELECT * FROM `{_SOURCE_SHOPIFY_DATASET}.product_variants`
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) v
+        ON v.product_id = p.id
+      WHERE UPPER(p.status) = 'ACTIVE'
+        AND SAFE_CAST(v.price AS FLOAT64) > 2
+        AND SAFE_CAST(v.price AS FLOAT64) < 4
+        AND p.title NOT LIKE '%Rezept%'"""
+
+# Internal token used on the wire: the recon frontend sends
+# collection=super-value, which is folded into the category parameter as
+# this token so the existing filter pipeline applies it everywhere.
+SUPER_VALUE_TOKEN = "__super_value__"
+SUPER_VALUE_FILTER_EXPR = (
+    f"(({CATEGORY_EXPR}) = 'flower' AND oi.product_name IN ({SUPER_VALUE_TITLES_SQL}))"
+)
+
+
+def _split_category_param(category: str) -> tuple[list, bool]:
+    """Split a (possibly comma-separated) category string into plain
+    categories and a flag for the Super Value collection token."""
+    cats = [c.strip() for c in category.split(",") if c.strip()]
+    super_value = SUPER_VALUE_TOKEN in cats
+    cats = [c for c in cats if c != SUPER_VALUE_TOKEN]
+    return cats, super_value
+
 
 def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, list]:
     """Build category filter SQL clause + params from a (possibly comma-separated) category string.
@@ -649,17 +686,18 @@ def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, l
     """
     if not category:
         return "", []
-    cats = [c.strip() for c in category.split(",") if c.strip()]
+    cats, super_value = _split_category_param(category)
+    frags, params = [], []
     if len(cats) == 1:
-        return (
-            f"AND ({CATEGORY_EXPR}) = @{param_name}",
-            [bigquery.ScalarQueryParameter(param_name, "STRING", cats[0])],
-        )
-    arr_name = f"{param_name}s"
-    return (
-        f"AND ({CATEGORY_EXPR}) IN UNNEST(@{arr_name})",
-        [bigquery.ArrayQueryParameter(arr_name, "STRING", cats)],
-    )
+        frags.append(f"AND ({CATEGORY_EXPR}) = @{param_name}")
+        params.append(bigquery.ScalarQueryParameter(param_name, "STRING", cats[0]))
+    elif cats:
+        arr_name = f"{param_name}s"
+        frags.append(f"AND ({CATEGORY_EXPR}) IN UNNEST(@{arr_name})")
+        params.append(bigquery.ArrayQueryParameter(arr_name, "STRING", cats))
+    if super_value:
+        frags.append(f"AND {SUPER_VALUE_FILTER_EXPR}")
+    return " ".join(frags), params
 
 
 def _product_line_sql(product_line: str, is_novacana: bool = False) -> tuple[str, list]:
@@ -715,13 +753,15 @@ def date_params(start_date: str, end_date: str, category: str = "", product_line
         clauses.append("DATE(o.created_at) <= @end_date")
         params.append(bigquery.ScalarQueryParameter("end_date", "DATE", end_date))
     if category:
-        cats = [c.strip() for c in category.split(",") if c.strip()]
+        cats, super_value = _split_category_param(category)
         if len(cats) == 1:
             clauses.append(f"({CATEGORY_EXPR}) = @category")
             params.append(bigquery.ScalarQueryParameter("category", "STRING", cats[0]))
-        else:
+        elif cats:
             clauses.append(f"({CATEGORY_EXPR}) IN UNNEST(@categories)")
             params.append(bigquery.ArrayQueryParameter("categories", "STRING", cats))
+        if super_value:
+            clauses.append(SUPER_VALUE_FILTER_EXPR)
     if product_line:
         pl_sql, pl_p = _product_line_sql(product_line, is_novacana=is_novacana)
         # pl_sql starts with "AND", strip it for clauses list
@@ -1505,7 +1545,7 @@ async def recon_logout(request: Request):
 async def api_recon_combined(
     request: Request, slug: str,
     start: str = "", end: str = "", cstart: str = "", cend: str = "",
-    category: str = "", product_line: str = "",
+    category: str = "", product_line: str = "", collection: str = "",
 ):
     """Combined reconciliation endpoint — returns all data in one response.
 
@@ -1515,9 +1555,17 @@ async def api_recon_combined(
       - comma-separated    → multiple brands (multi-select)
     ``category`` may also be comma-separated for multi-category.
     ``product_line`` filters by product_brand_name (affects all KPIs/charts).
+    ``collection`` — optional collection filter; ``super-value`` restricts all
+    figures to the "Blüten für unter 4 €" Shopify collection (shown as
+    "Super Value" in the menu).
     """
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
+
+    # Fold the collection filter into the category pipeline so every
+    # KPI, chart and table picks it up without further plumbing.
+    if collection in ("super-value", "super_value"):
+        category = f"{category},{SUPER_VALUE_TOKEN}" if category else SUPER_VALUE_TOKEN
 
     # ── resolve brand slug(s) → mfg_name for query building ──
     if slug == "all":
