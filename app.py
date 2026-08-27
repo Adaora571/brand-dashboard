@@ -1866,11 +1866,12 @@ async def api_recon_manufacturers(request: Request, store: str = "nordleaf"):
         return cached
     _DS = cfg["dataset"]
     shop = cfg["shop_where"].replace("o.shop_id", "oi.shop_id") if cfg["shop_where"] else ""
+    _mx = manufacturer_expr(store)
     sql = f"""
-    SELECT DISTINCT oi.product_manufacturer_name AS name
+    SELECT DISTINCT {_mx} AS name
     FROM `{_DS}.order_items` oi
-    WHERE oi.product_manufacturer_name IS NOT NULL
-      AND TRIM(oi.product_manufacturer_name) != ''
+    WHERE {_mx} IS NOT NULL
+      AND TRIM({_mx}) != ''
       {shop}
     ORDER BY 1
     """
