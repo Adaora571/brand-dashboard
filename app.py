@@ -875,13 +875,17 @@ def _smart_rule_sql(store: str, rule: dict):
             return f"p.title = '{esc(cond)}'"
         neg = "= 0" if rel == "not_contains" else "> 0"
         return f"STRPOS(LOWER(p.title), LOWER('{esc(cond)}')) {neg}"
-    if col in ("type", "product_type") and rel == "equals":
-        return f"p.product_type = '{esc(cond)}'"
+    if col in ("type", "product_type") and rel in ("equals", "contains", "not_contains"):
+        if rel == "equals":
+            return f"COALESCE(p.product_type, '') = '{esc(cond)}'"
+        neg = "= 0" if rel == "not_contains" else "> 0"
+        return f"STRPOS(LOWER(COALESCE(p.product_type, '')), LOWER('{esc(cond)}')) {neg}"
     if col == "vendor" and rel == "equals":
         return f"p.vendor = '{esc(cond)}'"
-    if col == "tag" and rel == "equals":
+    if col == "tag" and rel in ("equals", "not_equals"):
         pat = re.escape(cond).replace("'", "\\'")
-        return f"REGEXP_CONTAINS(COALESCE(p.tags, ''), r'(^|,)\\s*{pat}\\s*($|,)')"
+        expr = f"REGEXP_CONTAINS(COALESCE(p.tags, ''), r'(^|,)\\s*{pat}\\s*($|,)')"
+        return f"NOT {expr}" if rel == "not_equals" else expr
     return None
 
 
