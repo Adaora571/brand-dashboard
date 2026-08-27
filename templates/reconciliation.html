@@ -1921,7 +1921,23 @@ function renderProducts() {
   if (selectedProductLine) document.getElementById('filterBrand').value = selectedProductLine;
   const categories = [...new Set(currentProducts.map(p=>p.category).filter(Boolean))].sort();
   const origins = [...new Set(currentProducts.map(p=>p.origin).filter(Boolean))].sort();
-  populateSelect('filterCategory', categories, FEATURES.variant_detail ? 'All Pack Sizes' : 'All Categories');
+  if (FEATURES.variant_detail) {
+    // Pack Size filter is only useful within one product line — keep it
+    // disabled until a Product Line is selected, then list that line's sizes.
+    const catSel = document.getElementById('filterCategory');
+    const selLine = document.getElementById('filterBrand')?.value || '';
+    if (!selLine) {
+      catSel.innerHTML = '<option value="">Select product line first</option>';
+      catSel.value = '';
+      catSel.disabled = true;
+    } else {
+      catSel.disabled = false;
+      const sizes = [...new Set(currentProducts.filter(p => p.brand === selLine).map(p => p.category).filter(Boolean))].sort();
+      populateSelect('filterCategory', sizes, 'All Pack Sizes');
+    }
+  } else {
+    populateSelect('filterCategory', categories, 'All Categories');
+  }
   populateSelect('filterOrigin', origins, 'All Origins');
 
   // Populate region filter from patient data if available
