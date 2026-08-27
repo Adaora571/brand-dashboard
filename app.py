@@ -1646,7 +1646,7 @@ async def api_recon_combined(
     request: Request, slug: str,
     start: str = "", end: str = "", cstart: str = "", cend: str = "",
     category: str = "", product_line: str = "", collection: str = "",
-    stime: str = "", etime: str = "",
+    stime: str = "", etime: str = "", nocache: str = "",
 ):
     """Combined reconciliation endpoint — returns all data in one response.
 
@@ -1666,6 +1666,11 @@ async def api_recon_combined(
     """
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
+
+    # Manual refresh from the recon header: drop the query cache so all
+    # helpers re-query BigQuery fresh.
+    if nocache:
+        _cache.clear()
 
     # Fold the collection filter into the category pipeline so every
     # KPI, chart and table picks it up without further plumbing.

@@ -23,7 +23,15 @@
     content:''; position:absolute; top:0; left:0; right:0; height:1px;
     background:linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0) 100%);
   }
-  .header .subtitle { color:rgba(255,255,255,0.65); font-size:12px; margin-top:2px; font-weight:500; letter-spacing:0.3px; }
+  .header .subtitle { color:rgba(255,255,255,0.65); font-size:12px; margin-top:2px; font-weight:500; letter-spacing:0.3px; white-space:nowrap; }
+  .refresh-btn {
+    background:none; border:none; color:rgba(255,255,255,0.65); cursor:pointer;
+    font-size:14px; line-height:1; padding:2px 6px; margin-left:6px; border-radius:6px;
+    vertical-align:middle; transition:all 0.15s;
+  }
+  .refresh-btn:hover { color:#fff; background:rgba(255,255,255,0.12); }
+  .refresh-btn.spinning { animation:refresh-spin 0.9s linear infinite; pointer-events:none; }
+  @keyframes refresh-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
   .header-left { display:flex; flex-direction:column; flex-shrink:0; min-width:0; }
   @media (max-width: 1500px) { .header-left .subtitle { display:none; } }
   .logout-btn { color:rgba(255,255,255,0.55); padding:6px 12px; border-radius:8px; transition:all 0.2s; text-decoration:none; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; }
@@ -283,7 +291,7 @@
 <div class="header">
   <div class="header-left">
     <div><img src="/static/logos/nordleaf.svg?v=2" alt="NordLeaf" style="height:28px;"></div>
-    <div class="subtitle">Reconciliation Dashboard &bull; Live data &bull; <span id="lastUpdated">—</span></div>
+    <div class="subtitle">Reconciliation Dashboard &bull; <span id="lastUpdated">—</span><button class="refresh-btn" id="refreshBtn" onclick="forceRefresh()" title="Refresh data now">&#10227;</button></div>
   </div>
   <a href="/reconciliation/logout" class="logout-btn" title="Sign out">
     Sign out
@@ -736,6 +744,32 @@ function getCategoryParam() {
   return [...selectedCategories].join(',');
 }
 
+// ── DWH refresh schedule (Europe/Berlin) ──
+// The warehouse refreshes at 09/13/17/21 and 07/11/15/19/23 → every
+// 2 hours from 07:00 to 23:00, nothing overnight.
+const DWH_REFRESH_HOURS = [7, 9, 11, 13, 15, 17, 19, 21, 23];
+
+function dwhRefreshInfo() {
+  const berlinHour = parseInt(new Intl.DateTimeFormat('en-GB',
+    { timeZone: 'Europe/Berlin', hour: '2-digit', hour12: false }).format(new Date()), 10);
+  let last = null, next = null;
+  for (const h of DWH_REFRESH_HOURS) { if (h <= berlinHour) last = h; }
+  for (const h of DWH_REFRESH_HOURS) { if (h > berlinHour) { next = h; break; } }
+  const pad = h => String(h).padStart(2, '0') + ':00';
+  return {
+    last: last === null ? 'yesterday 23:00' : pad(last),
+    next: next === null ? 'tomorrow 07:00' : pad(next),
+  };
+}
+
+let forceNoCache = false;
+function forceRefresh() {
+  forceNoCache = true;
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  Promise.resolve(loadAll()).finally(() => btn.classList.remove('spinning'));
+}
+
 // ── Collection dropdown (Super Value) ──
 function toggleCollectionPanel() {
   const panel = document.getElementById('collectionPanel');
@@ -980,6 +1014,7 @@ async function loadAll() {
   const _st = document.getElementById('startTime')?.value || '00:00';
   const _et = document.getElementById('endTime')?.value || '23:59';
   if (!(_st === '00:00' && _et === '23:59')) url += `&stime=${encodeURIComponent(_st)}&etime=${encodeURIComponent(_et)}`;
+  if (forceNoCache) { url += '&nocache=1'; forceNoCache = false; }
 
   try {
     const resp = await fetch(url);
@@ -989,7 +1024,9 @@ async function loadAll() {
     }
     allData = await resp.json();
     render();
-    document.getElementById('lastUpdated').textContent = new Date().toLocaleString('en-US');
+    const dwh = dwhRefreshInfo();
+    document.getElementById('lastUpdated').textContent =
+      `Data refreshed ${dwh.last} · next ~${dwh.next}`;
     hideStatus();
   } catch (err) {
     console.error('Load failed:', err);
