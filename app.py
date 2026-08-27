@@ -674,14 +674,22 @@ SUPER_VALUE_FILTER_EXPR = (
 SUPER_VALUE_EXCLUDE_EXPR = f"(NOT {SUPER_VALUE_FILTER_EXPR})"
 
 
-def _split_category_param(category: str) -> tuple[list, bool, bool]:
+def _split_category_param(category: str) -> tuple[list, bool, bool, list]:
     """Split a (possibly comma-separated) category string into plain
-    categories plus flags for the Super Value / Excl. Super Value tokens."""
+    categories, flags for the Super Value / Excl. Super Value tokens,
+    and any journey collection ids carried via the __journeys__ token
+    (format: __journeys__:id1|id2|...)."""
     cats = [c.strip() for c in category.split(",") if c.strip()]
     super_value = SUPER_VALUE_TOKEN in cats
     super_value_excl = SUPER_VALUE_EXCL_TOKEN in cats
-    cats = [c for c in cats if c not in (SUPER_VALUE_TOKEN, SUPER_VALUE_EXCL_TOKEN)]
-    return cats, super_value, super_value_excl
+    journey_ids = []
+    for c in cats:
+        if c.startswith("__journeys__:"):
+            journey_ids = [j for j in c.split(":", 1)[1].split("|") if j.isdigit()]
+    cats = [c for c in cats
+            if c not in (SUPER_VALUE_TOKEN, SUPER_VALUE_EXCL_TOKEN)
+            and not c.startswith("__journeys__:")]
+    return cats, super_value, super_value_excl, journey_ids
 
 
 # ── Canonical product names ──────────────────────────────────
@@ -723,6 +731,64 @@ def _canonical_name_expr() -> str:
 CANONICAL_NAME_EXPR = _canonical_name_expr()
 
 
+# ── Multi-store support (HTV Sales Dashboard) ────────────────
+# Each store has its own datamart + Shopify source dataset and its own
+# feature set. "nordleaf" keeps the original behaviour exactly.
+_BQ_PROJECT = PROJECT_DATASET.split(".")[0]
+STORES = {
+    "nordleaf": {
+        "label": "NORDLEAF",
+        "dataset": PROJECT_DATASET,
+        "shop_where": "",  # single-store dataset, no shop_id column
+        "source_shopify": _SOURCE_SHOPIFY_DATASET,
+        "features": {"categories": True, "collections": True, "journeys": False,
+                     "targets": True, "fees": True, "config_brands": True},
+    },
+    "prio-one": {
+        "label": "PRIO ONE",
+        "dataset": f"{_BQ_PROJECT}.datamarts_unified",
+        "shop_where": "AND o.shop_id = 'prio_one'",
+        "source_shopify": f"{_BQ_PROJECT}.source_shopify_prio_one",
+        "features": {"categories": False, "collections": False, "journeys": True,
+                     "targets": False, "fees": False, "config_brands": False},
+    },
+}
+
+
+def store_cfg(store: str) -> dict:
+    """Resolve a store key to its config, defaulting to nordleaf."""
+    return STORES.get(store if store in STORES else "nordleaf")
+
+
+def canon_products_cte(store: str = "nordleaf") -> str:
+    """canon_products CTE against the given store's Shopify source dataset."""
+    src = store_cfg(store)["source_shopify"]
+    return f"""canon_products AS (
+      SELECT CAST(id AS STRING) AS product_id, title AS current_title
+      FROM `{src}.products`
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
+    )"""
+
+
+# ── "Journeys" filter (Prio One) ─────────────────────────────
+# Prio One's Shopify collections are therapy areas / patient journeys
+# (Menopause, GLP-1, Kinderwunsch, ...). The menu lists them live from
+# the source data; the filter matches order items whose product belongs
+# to ANY selected collection (membership via the `collects` table).
+JOURNEYS_TOKEN = "__journeys__"
+JOURNEY_EXCLUDE_TITLES = {"apo.com products", "apocom", "AFA Pharmacy"}
+
+
+def _journeys_filter_sql(journey_ids: list, param_name: str = "journey_ids") -> tuple[str, list]:
+    """Filter order items to products in any of the given Prio One collections."""
+    src = store_cfg("prio-one")["source_shopify"]
+    sql = (
+        f"oi.product_id IN (SELECT CAST(product_id AS STRING) "
+        f"FROM `{src}.collects` WHERE collection_id IN UNNEST(@{param_name}))"
+    )
+    return sql, [bigquery.ArrayQueryParameter(param_name, "INT64", [int(j) for j in journey_ids])]
+
+
 def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, list]:
     """Build category filter SQL clause + params from a (possibly comma-separated) category string.
 
@@ -731,7 +797,7 @@ def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, l
     """
     if not category:
         return "", []
-    cats, super_value, super_value_excl = _split_category_param(category)
+    cats, super_value, super_value_excl, journey_ids = _split_category_param(category)
     frags, params = [], []
     if len(cats) == 1:
         frags.append(f"AND ({CATEGORY_EXPR}) = @{param_name}")
@@ -744,6 +810,13 @@ def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, l
         frags.append(f"AND {SUPER_VALUE_FILTER_EXPR}")
     if super_value_excl:
         frags.append(f"AND {SUPER_VALUE_EXCLUDE_EXPR}")
+    if journey_ids:
+        # NOTE: fixed param name "journey_ids" so this fragment stays compatible
+        # with the params emitted by date_params() (helpers reuse the SQL
+        # fragment while taking the parameters from date_params).
+        j_sql, j_p = _journeys_filter_sql(journey_ids)
+        frags.append(f"AND {j_sql}")
+        params.extend(j_p)
     return " ".join(frags), params
 
 
@@ -815,7 +888,7 @@ def date_params(start_date: str, end_date: str, category: str = "", product_line
         else:
             clauses.append("DATE(o.created_at) <= @end_date")
     if category:
-        cats, super_value, super_value_excl = _split_category_param(category)
+        cats, super_value, super_value_excl, journey_ids = _split_category_param(category)
         if len(cats) == 1:
             clauses.append(f"({CATEGORY_EXPR}) = @category")
             params.append(bigquery.ScalarQueryParameter("category", "STRING", cats[0]))
@@ -826,6 +899,10 @@ def date_params(start_date: str, end_date: str, category: str = "", product_line
             clauses.append(SUPER_VALUE_FILTER_EXPR)
         if super_value_excl:
             clauses.append(SUPER_VALUE_EXCLUDE_EXPR)
+        if journey_ids:
+            j_sql, j_p = _journeys_filter_sql(journey_ids)
+            clauses.append(j_sql)
+            params.extend(j_p)
     if product_line:
         pl_sql, pl_p = _product_line_sql(product_line, is_novacana=is_novacana)
         # pl_sql starts with "AND", strip it for clauses list
@@ -915,12 +992,12 @@ async def brand_logout(request: Request, hashed_slug: str):
 # ============================================================
 async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
     category: str = "", compare_start: str = "", compare_end: str = "",
-    product_line: str = "", start_time: str = "", end_time: str = ""):
+    product_line: str = "", start_time: str = "", end_time: str = "", store: str = "nordleaf"):
     """Internal helper for summary query, used by both brand and recon APIs."""
 
     # Check cache first
     ck = cache_key("summary", slug=slug, s=start_date, e=end_date, cat=category,
-                   cs=compare_start, ce=compare_end, pl=product_line, st=start_time, et=end_time)
+                   cs=compare_start, ce=compare_end, pl=product_line, st=start_time, et=end_time, store=store)
     cached = cache_get(ck)
     if cached:
         return cached
@@ -962,6 +1039,9 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         ce = e
 
     mfg_where, mfg_p = mfg_clause(mfg_name)
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
+    if _cfg["shop_where"]:
+        mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
 
     sql = f"""
     WITH curr AS (
@@ -978,8 +1058,8 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
         SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
         SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0) - COALESCE(oi.refund_amount_including_vat_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
-      FROM `{PROJECT_DATASET}.order_items` oi
-      JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+      FROM `{_DS}.order_items` oi
+      JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     ),
     repeat_stats AS (
@@ -991,15 +1071,15 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
       FROM (
         -- Get customers who ordered in the selected period
         SELECT DISTINCT o.customer_id
-        FROM `{PROJECT_DATASET}.order_items` oi
-        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        FROM `{_DS}.order_items` oi
+        JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
         WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
       ) period_customers
       JOIN (
         -- Count LIFETIME orders per customer (no date filter)
         SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS lifetime_orders
-        FROM `{PROJECT_DATASET}.order_items` oi
-        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        FROM `{_DS}.order_items` oi
+        JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
         WHERE {mfg_where} {NET_ORDER_FILTER}
         GROUP BY 1
       ) lifetime ON period_customers.customer_id = lifetime.customer_id
@@ -1014,8 +1094,8 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
         SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_prescription
-      FROM `{PROJECT_DATASET}.order_items` oi
-      JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+      FROM `{_DS}.order_items` oi
+      JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
         AND {compare_clause}
         {cat_sql} {pl_sql}
@@ -1025,16 +1105,16 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SAFE_DIVIDE(COUNTIF(lifetime_orders >= 2), COUNT(*)) AS repeat_purchase_rate
       FROM (
         SELECT DISTINCT o.customer_id
-        FROM `{PROJECT_DATASET}.order_items` oi
-        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        FROM `{_DS}.order_items` oi
+        JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
         WHERE {mfg_where} {NET_ORDER_FILTER}
           AND {compare_clause}
           {cat_sql} {pl_sql}
       ) prev_customers
       JOIN (
         SELECT o.customer_id, COUNT(DISTINCT o.order_id) AS lifetime_orders
-        FROM `{PROJECT_DATASET}.order_items` oi
-        JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+        FROM `{_DS}.order_items` oi
+        JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
         WHERE {mfg_where} {NET_ORDER_FILTER}
         GROUP BY 1
       ) lifetime ON prev_customers.customer_id = lifetime.customer_id
@@ -1120,10 +1200,10 @@ async def api_summary(
 # API: Monthly Trends (Helper)
 # ============================================================
 async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = "", store: str = "nordleaf"):
     """Internal helper for trends query, used by both brand and recon APIs."""
 
-    ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
+    ck = cache_key("trends", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time, store=store)
     cached = cache_get(ck)
     if cached:
         return cached
@@ -1132,6 +1212,9 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
     date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
                                      start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
+    if _cfg["shop_where"]:
+        mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
 
     sql = f"""
     SELECT
@@ -1145,8 +1228,8 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
       SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate,
       SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
       SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0) - COALESCE(oi.refund_amount_including_vat_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY period ORDER BY period
     """
@@ -1174,12 +1257,12 @@ async def api_trends(request: Request, hashed_slug: str, start_date: str = "", e
 # ============================================================
 async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
     region: str = "", brand: str = "", category: str = "", origin: str = "",
-    product_line: str = "", start_time: str = "", end_time: str = ""):
+    product_line: str = "", start_time: str = "", end_time: str = "", store: str = "nordleaf"):
     """Internal helper for products query, used by both brand and recon APIs."""
 
     ck = cache_key("products", slug=slug, s=start_date, e=end_date,
                    region=region, brand=brand, category=category, origin=origin, pl=product_line,
-                   st=start_time, et=end_time)
+                   st=start_time, et=end_time, store=store)
     cached = cache_get(ck)
     if cached:
         return cached
@@ -1188,6 +1271,9 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     date_where, date_p = date_params(start_date, end_date, product_line=product_line, is_novacana=_nova,
                                      start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
+    if _cfg["shop_where"]:
+        mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
 
     extra_where = ""
     extra_params = []
@@ -1207,7 +1293,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
         extra_params.append(bigquery.ScalarQueryParameter("origin", "STRING", origin))
 
     sql = f"""
-    WITH {CANON_PRODUCTS_CTE}
+    WITH {canon_products_cte(store)}
     SELECT
       {CANONICAL_NAME_EXPR} AS product_name,
       MAX(oi.product_brand_name) AS product_brand_name,
@@ -1220,8 +1306,8 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
       SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
       SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_rx
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     LEFT JOIN canon_products cn ON cn.product_id = oi.product_id
     WHERE {mfg_where} {date_where} {extra_where} {NET_ORDER_FILTER}
     GROUP BY 1,4,5
@@ -1273,11 +1359,11 @@ async def api_products(
 # API: Breakdowns (category, origin, price tier, products/order, brand) (Helper)
 # ============================================================
 async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = "", store: str = "nordleaf"):
     """Internal helper for breakdowns query, used by both brand and recon APIs."""
 
     # Check cache first
-    ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
+    ck = cache_key("breakdowns", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time, store=store)
     cached = cache_get(ck)
     if cached:
         return cached
@@ -1286,21 +1372,24 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
                                      start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
+    if _cfg["shop_where"]:
+        mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
     base_params = mfg_p + date_p
 
     cat_sql = f"""
     SELECT ({CATEGORY_EXPR}) AS category,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
     ori_sql = f"""
     SELECT oi.product_country_or_origin AS origin,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
@@ -1314,8 +1403,8 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
         ELSE '> €14/g'
       END AS price_tier,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY 1
     """
@@ -1323,8 +1412,8 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     SELECT items AS products_per_order, COUNT(*) AS order_count
     FROM (
       SELECT o.order_id, LEAST(COUNT(oi.order_item_id), 4) AS items
-      FROM `{PROJECT_DATASET}.order_items` oi
-      JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+      FROM `{_DS}.order_items` oi
+      JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
       GROUP BY 1
     ) GROUP BY 1 ORDER BY 1
@@ -1333,8 +1422,8 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     SELECT COALESCE(oi.product_brand_name, 'Unknown') AS brand,
       COUNT(DISTINCT oi.order_id) AS prescriptions,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
@@ -1342,8 +1431,8 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     SELECT COALESCE(oi.product_manufacturer_name, 'Unknown') AS manufacturer,
       SUM(oi.quantity_after_cancellations) AS volume_units,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
@@ -1379,10 +1468,10 @@ async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "
 # API: Patient Insights (Helper)
 # ============================================================
 async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = "", store: str = "nordleaf"):
     """Internal helper for patients query, used by both brand and recon APIs."""
 
-    ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
+    ck = cache_key("patients", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time, store=store)
     cached = cache_get(ck)
     if cached:
         return cached
@@ -1393,13 +1482,16 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     cat_sql, _ = _cat_filter_sql(category)  # SQL only; params already in date_p
     pl_sql, _ = _product_line_sql(product_line, is_novacana=_nova)  # SQL only; params already in date_p
     mfg_where, mfg_p = mfg_clause(mfg_name)
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
+    if _cfg["shop_where"]:
+        mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
     base_params = mfg_p + date_p
 
     fo_cte = f"""
     WITH first_order AS (
       SELECT o.customer_id, MIN(DATE(o.created_at)) AS first_date
-      FROM `{PROJECT_DATASET}.order_items` oi
-      JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+      FROM `{_DS}.order_items` oi
+      JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
       GROUP BY 1
     )"""
@@ -1414,8 +1506,8 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
        - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
        - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     JOIN first_order f ON o.customer_id = f.customer_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1,2 ORDER BY 1,2
@@ -1430,8 +1522,8 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
        - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
        - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     JOIN first_order f ON o.customer_id = f.customer_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY 1
@@ -1448,16 +1540,16 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
         ELSE 'Unknown'
       END AS age_segment,
       COUNT(DISTINCT o.customer_id) AS patient_count
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY 1 ORDER BY 1
     """
     reg_sql = f"""
     SELECT TRIM(o.shipping_address.region) AS region,
       COUNT(DISTINCT o.customer_id) AS patient_count
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
       AND o.shipping_address.region IS NOT NULL
       AND TRIM(o.shipping_address.region) != ''
@@ -1491,10 +1583,10 @@ async def api_patients(request: Request, hashed_slug: str, start_date: str = "",
 # API: Pricing (Avg €/g over time) (Helper)
 # ============================================================
 async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date: str = "",
-    category: str = "", product_line: str = "", start_time: str = "", end_time: str = ""):
+    category: str = "", product_line: str = "", start_time: str = "", end_time: str = "", store: str = "nordleaf"):
     """Internal helper for pricing query, used by both brand and recon APIs."""
 
-    ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time)
+    ck = cache_key("pricing", slug=slug, s=start_date, e=end_date, cat=category, pl=product_line, st=start_time, et=end_time, store=store)
     cached = cache_get(ck)
     if cached:
         return cached
@@ -1503,13 +1595,16 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
     date_where, date_p = date_params(start_date, end_date, category, product_line, is_novacana=_nova,
                                      start_time=start_time, end_time=end_time)
     mfg_where, mfg_p = mfg_clause(mfg_name)
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
+    if _cfg["shop_where"]:
+        mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
 
     sql = f"""
     SELECT
       FORMAT_DATE('%Y-%m', DATE(o.created_at)) AS period,
       SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
     GROUP BY period ORDER BY period
     """
@@ -1529,13 +1624,16 @@ async def api_pricing(request: Request, hashed_slug: str, start_date: str = "", 
 # ============================================================
 # API: Categories for a manufacturer (Helper)
 # ============================================================
-async def _get_categories(mfg_name: str):
+async def _get_categories(mfg_name: str, store: str = "nordleaf"):
     """Internal helper for categories query, used by both brand and recon APIs."""
     mfg_where, mfg_p = mfg_clause(mfg_name)
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
+    if _cfg["shop_where"]:
+        mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
     sql = f"""
     SELECT DISTINCT ({CATEGORY_EXPR}) AS category
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where}
       AND oi.product_vertical IS NOT NULL
     ORDER BY 1
@@ -1555,15 +1653,16 @@ async def api_categories(request: Request, hashed_slug: str):
 # MARKET SHARE HELPER (used by reconciliation dashboard)
 # ============================================================
 async def _get_platform_total_rx(start_date: str = "", end_date: str = "", category: str = "",
-    product_line: str = "", start_time: str = "", end_time: str = ""):
+    product_line: str = "", start_time: str = "", end_time: str = "", store: str = "nordleaf"):
     """Get total prescriptions across ALL manufacturers on the platform."""
     s = start_date or "2020-01-01"
     e = end_date or datetime.now().strftime("%Y-%m-%d")
-    ck = cache_key("platform_total", s=s, e=e, cat=category, pl=product_line, st=start_time, et=end_time)
+    ck = cache_key("platform_total", s=s, e=e, cat=category, pl=product_line, st=start_time, et=end_time, store=store)
     cached = cache_get(ck)
     if cached:
         return cached
 
+    _cfg = store_cfg(store); _DS = _cfg["dataset"]
     cat_frag, cat_p = _cat_filter_sql(category)
     pl_frag, pl_p = _product_line_sql(product_line)
     if start_time and end_time:
@@ -1583,9 +1682,9 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
         time_p = []
     sql = f"""
     SELECT COUNT(DISTINCT o.order_id) AS total_rx
-    FROM `{PROJECT_DATASET}.order_items` oi
-    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
-    WHERE {date_clause}
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
+    WHERE {date_clause} {_cfg["shop_where"]}
       {NET_ORDER_FILTER} {cat_frag} {pl_frag}
     """
     params = [
@@ -1608,34 +1707,126 @@ HTV_RECON_PASSWORD = os.getenv("HTV_RECON_PASSWORD", "Rv3#nL8kT5wQ")
 DASHBOARD_ONLY_BRANDS = {"dunbar"}
 
 
-@app.get("/reconciliation", response_class=HTMLResponse)
-async def recon_page(request: Request):
-    """Show reconciliation dashboard if logged in, otherwise redirect to login."""
+def _render_sales_page(request: Request, store: str):
+    """Render the HTV Sales Dashboard for a store (or the login page)."""
     if not request.session.get("recon_auth"):
         return templates.TemplateResponse("recon_login.html", {"request": request, "error": ""})
+    cfg = store_cfg(store)
     return templates.TemplateResponse("reconciliation.html", {
         "request": request,
         "brands": {slug: {"name": get_display_name(slug), "hash": f"{BRAND_HASHES[slug]}-{slug}"}
                    for slug in MANUFACTURER_BQ_NAMES if slug not in DASHBOARD_ONLY_BRANDS},
         "fees": MANUFACTURER_FEES,
         "quarterly_targets": QUARTERLY_TARGETS,
+        "store": store,
+        "store_label": cfg["label"],
+        "features": cfg["features"],
+        "store_links": [
+            {"key": "nordleaf", "label": "NORDLEAF", "url": "/sales", "active": store == "nordleaf"},
+            {"key": "prio-one", "label": "PRIO ONE", "url": "/sales/prio-one", "active": store == "prio-one"},
+        ],
     })
 
 
+@app.get("/sales", response_class=HTMLResponse)
+async def sales_page(request: Request):
+    """HTV Sales Dashboard — Nordleaf store."""
+    return _render_sales_page(request, "nordleaf")
+
+
+@app.get("/sales/prio-one", response_class=HTMLResponse)
+async def sales_page_prio_one(request: Request):
+    """HTV Sales Dashboard — Prio One store."""
+    return _render_sales_page(request, "prio-one")
+
+
+@app.get("/reconciliation")
+async def recon_page_redirect(request: Request):
+    """Old link — the dashboard now lives at /sales."""
+    return RedirectResponse(url="/sales", status_code=307)
+
+
+@app.post("/sales/login")
 @app.post("/reconciliation/login")
 async def recon_login(request: Request, password: str = Form(...)):
-    """Handle reconciliation login."""
+    """Handle sales dashboard login (old /reconciliation/login kept as alias)."""
     if not hmac.compare_digest(password, HTV_RECON_PASSWORD):
         return templates.TemplateResponse("recon_login.html", {"request": request, "error": "Invalid password."}, status_code=401)
     request.session["recon_auth"] = True
-    return RedirectResponse(url="/reconciliation", status_code=303)
+    return RedirectResponse(url="/sales", status_code=303)
 
 
+@app.get("/sales/logout")
 @app.get("/reconciliation/logout")
 async def recon_logout(request: Request):
-    """Clear reconciliation session and redirect to login."""
+    """Clear session and redirect to login."""
     request.session.pop("recon_auth", None)
-    return RedirectResponse(url="/reconciliation", status_code=303)
+    return RedirectResponse(url="/sales", status_code=303)
+
+
+# ============================================================
+# SALES DASHBOARD — store metadata endpoints
+# ============================================================
+@app.get("/api/recon/meta/manufacturers")
+async def api_recon_manufacturers(request: Request, store: str = "nordleaf"):
+    """Distinct manufacturer names present in a store's data (for stores
+    without a configured brand list, e.g. Prio One)."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    store = store if store in STORES else "nordleaf"
+    cfg = store_cfg(store)
+    ck = cache_key("mfr_list", store=store)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+    _DS = cfg["dataset"]
+    shop = cfg["shop_where"].replace("o.shop_id", "oi.shop_id") if cfg["shop_where"] else ""
+    sql = f"""
+    SELECT DISTINCT oi.product_manufacturer_name AS name
+    FROM `{_DS}.order_items` oi
+    WHERE oi.product_manufacturer_name IS NOT NULL
+      AND TRIM(oi.product_manufacturer_name) != ''
+      {shop}
+    ORDER BY 1
+    """
+    rows = run_query(sql, [])
+    result = {"manufacturers": [r["name"] for r in rows]}
+    cache_set(ck, result)
+    return result
+
+
+@app.get("/api/recon/meta/journeys")
+async def api_recon_journeys(request: Request, store: str = "prio-one"):
+    """Journey list for the Journeys menu: the store's Shopify collections
+    (latest snapshot per id) that have product members, minus channel-type
+    collections. Live from the source data — new collections appear
+    automatically after the next sync."""
+    if not request.session.get("recon_auth"):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    store = store if store in STORES else "prio-one"
+    cfg = store_cfg(store)
+    ck = cache_key("journeys", store=store)
+    cached = cache_get(ck)
+    if cached:
+        return cached
+    src = cfg["source_shopify"]
+    sql = f"""
+    SELECT CAST(id AS STRING) AS id, title
+    FROM `{src}.collections`
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
+    """
+    rows = run_query(sql, [])
+    member_sql = f"SELECT DISTINCT CAST(collection_id AS STRING) AS cid FROM `{src}.collects`"
+    member_ids = {r["cid"] for r in run_query(member_sql, [])}
+    journeys = [
+        {"id": r["id"], "title": r["title"]}
+        for r in rows
+        if r["id"] in member_ids and r["title"] not in JOURNEY_EXCLUDE_TITLES
+    ]
+    journeys.sort(key=lambda j: j["title"].lower())
+    result = {"journeys": journeys}
+    cache_set(ck, result)
+    return result
 
 
 # ============================================================
@@ -1647,6 +1838,7 @@ async def api_recon_combined(
     start: str = "", end: str = "", cstart: str = "", cend: str = "",
     category: str = "", product_line: str = "", collection: str = "",
     stime: str = "", etime: str = "", nocache: str = "",
+    store: str = "nordleaf", journeys: str = "",
 ):
     """Combined reconciliation endpoint — returns all data in one response.
 
@@ -1667,6 +1859,9 @@ async def api_recon_combined(
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
 
+    store = store if store in STORES else "nordleaf"
+    _DS = store_cfg(store)["dataset"]
+
     # Manual refresh from the recon header: drop the query cache so all
     # helpers re-query BigQuery fresh.
     if nocache:
@@ -1679,6 +1874,14 @@ async def api_recon_combined(
     elif collection in ("excl-super-value", "exclude-super-value", "excl_super_value"):
         category = f"{category},{SUPER_VALUE_EXCL_TOKEN}" if category else SUPER_VALUE_EXCL_TOKEN
 
+    # Journeys filter (Prio One): fold into the category pipeline as a token,
+    # same mechanism as the collection filter.
+    if journeys and store_cfg(store)["features"]["journeys"]:
+        _jids = [j for j in re.split(r"[,|]", journeys) if j.strip().isdigit()]
+        if _jids:
+            _jtok = f"{JOURNEYS_TOKEN}:{'|'.join(_jids)}"
+            category = f"{category},{_jtok}" if category else _jtok
+
     # Sanitize the optional time window; whole-day defaults mean "no time filter"
     _t_re = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     if not (_t_re.match(stime or "") and _t_re.match(etime or "")):
@@ -1687,7 +1890,17 @@ async def api_recon_combined(
         stime, etime = "", ""
 
     # ── resolve brand slug(s) → mfg_name for query building ──
-    if slug == "all":
+    if not store_cfg(store)["features"]["config_brands"]:
+        # Stores without a configured brand list (Prio One): the slug carries
+        # literal manufacturer names from the data (comma-separated).
+        if slug == "all":
+            mfg_name = None
+            selected_slugs = []
+        else:
+            names = [s.strip() for s in slug.split(",") if s.strip()]
+            mfg_name = names if len(names) > 1 else names[0]
+            selected_slugs = names
+    elif slug == "all":
         mfg_name = None  # No manufacturer filter — consolidated view
         selected_slugs = []
     elif "," in slug:
@@ -1723,14 +1936,14 @@ async def api_recon_combined(
     # Run all queries in parallel (including platform total for market share)
     pl = product_line
     summary, trends, products, breakdowns, patients, patients_prev, pricing, platform_rx = await asyncio.gather(
-        _get_summary(mfg_name, slug, start, end, category, cstart, cend, product_line=pl, start_time=stime, end_time=etime),
-        _get_trends(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
-        _get_products(mfg_name, slug, start, end, category=category, product_line=pl, start_time=stime, end_time=etime),
-        _get_breakdowns(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
-        _get_patients(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
-        _get_patients(mfg_name, slug, comp_s, comp_e, category, product_line=pl, start_time=stime, end_time=etime),
-        _get_pricing(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime),
-        _get_platform_total_rx(start, end, category, product_line=pl, start_time=stime, end_time=etime),
+        _get_summary(mfg_name, slug, start, end, category, cstart, cend, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_trends(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_products(mfg_name, slug, start, end, category=category, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_breakdowns(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_patients(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_patients(mfg_name, slug, comp_s, comp_e, category, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_pricing(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_platform_total_rx(start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
     )
 
     # Map summary → kpi / kpi_compare
@@ -1837,7 +2050,7 @@ async def api_recon_combined(
     # volume/revenue from category rules and product_rules that aren't
     # already counted via manufacturer redirect. Group by source manufacturer
     # so we can subtract from the correct rows (avoid double-counting).
-    if multi_source_slugs:
+    if multi_source_slugs and store == "nordleaf":
         _dw, _dp = date_params(start, end, category)
         for ms_slug, ms_cfg in multi_source_slugs.items():
             if ms_slug not in _mfr_merged:
@@ -1878,8 +2091,8 @@ async def api_recon_combined(
                   (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
                    - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
                    - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
-                FROM `{PROJECT_DATASET}.order_items` oi
-                JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+                FROM `{_DS}.order_items` oi
+                JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
                 WHERE ({" OR ".join(extra_or)})
                   AND COALESCE(oi.product_manufacturer_name, 'Unknown') NOT IN UNNEST(@absorbed)
                   {_dw} {NET_ORDER_FILTER}
@@ -2082,12 +2295,13 @@ async def debug_schema(request: Request, search: str = ""):
 @app.get("/api/data-freshness")
 async def data_freshness():
     """Check the latest order date in BigQuery — useful for diagnosing pipeline lag."""
+    _DS = PROJECT_DATASET
     sql = f"""
     SELECT
       MAX(DATE(o.created_at)) AS latest_order_date,
-      COUNT(DISTINCT CASE WHEN DATE(o.created_at) = (SELECT MAX(DATE(created_at)) FROM `{PROJECT_DATASET}.orders`) THEN o.order_id END) AS orders_on_latest_day,
+      COUNT(DISTINCT CASE WHEN DATE(o.created_at) = (SELECT MAX(DATE(created_at)) FROM `{_DS}.orders`) THEN o.order_id END) AS orders_on_latest_day,
       COUNT(DISTINCT o.order_id) AS total_orders_last_7d
-    FROM `{PROJECT_DATASET}.orders` o
+    FROM `{_DS}.orders` o
     WHERE DATE(o.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
     """
     rows = run_query(sql, [])

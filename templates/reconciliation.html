@@ -34,6 +34,20 @@
   @keyframes refresh-spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
   .header-left { display:flex; flex-direction:column; flex-shrink:0; min-width:0; }
   @media (max-width: 1500px) { .header-left .subtitle .sub-static { display:none; } }
+  .logo-text { font-size:22px; font-weight:800; letter-spacing:0.5px; white-space:nowrap; }
+  .store-switch { display:flex; border:1px solid rgba(255,255,255,0.25); border-radius:10px; overflow:hidden; flex-shrink:0; }
+  .store-switch a {
+    padding:9px 13px; font-size:12px; font-weight:700; letter-spacing:0.4px;
+    color:rgba(255,255,255,0.55); text-decoration:none; white-space:nowrap; transition:all 0.15s;
+  }
+  .store-switch a:hover { color:#fff; }
+  .store-switch a.active { background:rgba(255,255,255,0.18); color:#fff; }
+  /* Prio One accent (dark green instead of Nordleaf purple) */
+  body.store-prio-one { --primary:#0b2e1f; --navy:#14503a; }
+  body.store-prio-one #mfrTableEl th { background:#0b2e1f; border-bottom-color:#0b2e1f; }
+  /* Stores without Q targets: hide the target columns in the manufacturer table */
+  body.no-targets #mfrTableEl th:nth-child(5), body.no-targets #mfrTableEl td:nth-child(5),
+  body.no-targets #mfrTableEl th:nth-child(6), body.no-targets #mfrTableEl td:nth-child(6) { display:none; }
   .logout-btn { color:rgba(255,255,255,0.55); padding:6px 12px; border-radius:8px; transition:all 0.2s; text-decoration:none; display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; }
   .logout-btn:hover { color:#fff; background:rgba(255,255,255,0.12); }
   .header-controls { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; min-width:0; }
@@ -285,13 +299,13 @@
   }
 </style>
 </head>
-<body>
+<body class="store-{{ store }}">
 
 <!-- HEADER -->
 <div class="header">
   <div class="header-left">
-    <div><img src="/static/logos/nordleaf.svg?v=2" alt="NordLeaf" style="height:28px;"></div>
-    <div class="subtitle"><span class="sub-static">Reconciliation Dashboard &bull; </span><span id="lastUpdated">—</span><button class="refresh-btn" id="refreshBtn" onclick="forceRefresh()" title="Refresh data now">&#10227;</button></div>
+    <div class="logo-text">HTV Sales Dashboard</div>
+    <div class="subtitle"><span class="sub-static">{{ store_label }} &bull; </span><span id="lastUpdated">—</span><button class="refresh-btn" id="refreshBtn" onclick="forceRefresh()" title="Refresh data now">&#10227;</button></div>
   </div>
   <a href="/reconciliation/logout" class="logout-btn" title="Sign out">
     Sign out
@@ -300,6 +314,11 @@
     </svg>
   </a>
   <div class="header-controls pos-rel">
+    <!-- Store switcher -->
+    <div class="store-switch">
+      {% for s in store_links %}<a href="{{ s.url }}" class="{{ 'active' if s.active else '' }}">{{ s.label }}</a>{% endfor %}
+    </div>
+
     <!-- Multi-select Brand dropdown -->
     <div class="ms-dropdown" id="brandDropdown">
       <div class="ms-trigger" id="brandTrigger" onclick="toggleMsPanel('brand')">All Brands</div>
@@ -313,6 +332,7 @@
       </div>
     </div>
 
+    {% if features.categories %}
     <!-- Multi-select Category dropdown -->
     <div class="ms-dropdown" id="categoryDropdown">
       <div class="ms-trigger" id="categoryTrigger" onclick="toggleMsPanel('category')">All Categories</div>
@@ -325,7 +345,24 @@
         </div>
       </div>
     </div>
+    {% endif %}
 
+    {% if features.journeys %}
+    <!-- Multi-select Journeys dropdown (therapy areas from Shopify collections) -->
+    <div class="ms-dropdown" id="journeyDropdown">
+      <div class="ms-trigger" id="journeyTrigger" onclick="toggleMsPanel('journey')">All Journeys</div>
+      <div class="ms-panel" id="journeyPanel">
+        <input class="ms-search" id="journeySearch" placeholder="Search journeys…" oninput="filterMsOptions('journey')">
+        <div class="ms-options" id="journeyOptions"></div>
+        <div class="ms-actions">
+          <button class="ms-clear-btn" onclick="msClearAll('journey')">Clear</button>
+          <button class="ms-apply-btn" onclick="msApply('journey')">Apply</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if features.collections %}
     <!-- Collection dropdown (Super Value) -->
     <div class="ms-dropdown" id="collectionDropdown">
       <div class="ms-trigger" id="collectionTrigger" onclick="toggleCollectionPanel()">All Collections</div>
@@ -337,6 +374,7 @@
         </div>
       </div>
     </div>
+    {% endif %}
 
     <button class="date-trigger" id="dateTrigger" onclick="toggleDatePanel()">
       <span class="date-icon">📅</span>
@@ -679,6 +717,8 @@ const PALETTE = [
 const BRANDS_DATA = {{ brands | tojson }};
 const FEES_DATA = {{ fees | tojson }};
 const QUARTERLY_TARGETS = {{ quarterly_targets | tojson }};
+const STORE = {{ store | tojson }};
+const FEATURES = {{ features | tojson }};
 
 function getProRatedTarget(slug, startStr, endStr) {
   if (!startStr || !endStr) return null;
@@ -725,7 +765,14 @@ function getProRatedTarget(slug, startStr, endStr) {
 // State
 let selectedBrands = new Set();    // empty = "all brands"
 let selectedCategories = new Set(); // empty = "all categories"
+let selectedJourneys = new Set();   // empty = "all journeys" (Prio One)
+let journeyTitles = {};             // journey collection id → display title
 let selectedCollection = '';        // '' = all, 'super-value' = Super Value collection
+
+// Multi-select state lookup (brand / category / journey dropdowns share the ms machinery)
+function msSel(type) {
+  return type === 'brand' ? selectedBrands : (type === 'journey' ? selectedJourneys : selectedCategories);
+}
 let selectedProductLine = '';       // page-level product line filter
 let cachedProductLines = [];        // full list of product lines (cached from unfiltered load)
 let allData = {};
@@ -821,7 +868,7 @@ function buildMsOptions(type, items, selected) {
 }
 
 function msToggleAll(type, checked) {
-  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  const sel = msSel(type);
   if (checked) {
     sel.clear();
   }
@@ -834,7 +881,7 @@ function msToggleAll(type, checked) {
 }
 
 function msToggleOne(type, value, checked) {
-  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  const sel = msSel(type);
   if (checked) {
     sel.add(value);
   } else {
@@ -847,7 +894,7 @@ function msToggleOne(type, value, checked) {
 }
 
 function msClearAll(type) {
-  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  const sel = msSel(type);
   sel.clear();
   document.querySelectorAll(`#${type}Options input[type=checkbox]`).forEach(cb => cb.checked = false);
   const allCb = document.querySelector(`#${type}Options .ms-all input`);
@@ -862,15 +909,18 @@ function msApply(type) {
 }
 
 function updateMsTriggerText(type) {
-  const sel = type === 'brand' ? selectedBrands : selectedCategories;
+  const sel = msSel(type);
   const trigger = document.getElementById(type + 'Trigger');
-  const allLabel = type === 'brand' ? 'All Brands' : 'All Categories';
+  const allLabels = { brand: 'All Brands', category: 'All Categories', journey: 'All Journeys' };
+  const allLabel = allLabels[type] || 'All';
   if (sel.size === 0) {
     trigger.textContent = allLabel;
   } else if (sel.size === 1) {
     const val = [...sel][0];
     if (type === 'brand') {
       trigger.textContent = BRANDS_DATA[val]?.name || val;
+    } else if (type === 'journey') {
+      trigger.textContent = journeyTitles[val] || val;
     } else {
       trigger.textContent = val;
     }
@@ -925,10 +975,25 @@ let productTotalCount = 0;
 document.addEventListener('DOMContentLoaded', initBrands);
 
 async function initBrands() {
-  // Build brand multi-select options
-  const brandItems = Object.keys(BRANDS_DATA).map(slug => ({
-    value: slug, label: BRANDS_DATA[slug].name
-  })).sort((a, b) => a.label.localeCompare(b.label));
+  if (!FEATURES.targets) document.body.classList.add('no-targets');
+
+  // Build brand multi-select options. Stores without a configured brand
+  // list (Prio One) load manufacturer names live from the data instead.
+  let brandItems;
+  if (FEATURES.config_brands) {
+    brandItems = Object.keys(BRANDS_DATA).map(slug => ({
+      value: slug, label: BRANDS_DATA[slug].name
+    })).sort((a, b) => a.label.localeCompare(b.label));
+  } else {
+    brandItems = [];
+    try {
+      const resp = await fetch(`/api/recon/meta/manufacturers?store=${encodeURIComponent(STORE)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        brandItems = (data.manufacturers || []).map(n => ({ value: n, label: n }));
+      }
+    } catch (e) { console.error('Manufacturer list load failed:', e); }
+  }
   buildMsOptions('brand', brandItems, selectedBrands);
 
   // Compute default comparison dates (QTD) before first load
@@ -949,12 +1014,33 @@ async function initBrands() {
   document.getElementById('mfrSection').style.display = '';
   document.getElementById('feeSection').style.display = 'none';
 
-  // Load categories and data for "All Brands" on page load
+  // Load categories/journeys and data for "All Brands" on page load
   await loadCategories();
+  await loadJourneys();
   await loadAll();
 }
 
+async function loadJourneys() {
+  if (!FEATURES.journeys) return;
+  try {
+    const resp = await fetch(`/api/recon/meta/journeys?store=${encodeURIComponent(STORE)}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    journeyTitles = {};
+    const items = (data.journeys || []).map(j => {
+      journeyTitles[j.id] = j.title;
+      return { value: j.id, label: j.title };
+    });
+    selectedJourneys.forEach(id => { if (!(id in journeyTitles)) selectedJourneys.delete(id); });
+    buildMsOptions('journey', items, selectedJourneys);
+    updateMsTriggerText('journey');
+  } catch (e) {
+    console.error('Journeys load failed:', e);
+  }
+}
+
 async function loadCategories() {
+  if (!FEATURES.categories) return;
   try {
     const slugParam = getSlugParam();
     // For multi-brand, fetch categories for "all" (superset)
@@ -981,7 +1067,7 @@ async function onFilterChange(brandChanged = false) {
   const isSingleBrand = selectedBrands.size === 1;
   // Show/hide Fee Terms section: only for single brand selection
   const feeSection = document.getElementById('feeSection');
-  feeSection.style.display = isSingleBrand ? '' : 'none';
+  feeSection.style.display = (isSingleBrand && FEATURES.fees) ? '' : 'none';
   document.getElementById('mfrSection').style.display = isSingleBrand ? 'none' : '';
   // Reload categories if brand selection changed
   if (brandChanged) await loadCategories();
@@ -1007,8 +1093,9 @@ async function loadAll() {
   const ce = document.getElementById('compareEnd').value;
   const cat = getCategoryParam();
   const slugParam = getSlugParam();
-  let url = `/api/recon/${slugParam}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}`;
+  let url = `/api/recon/${encodeURIComponent(slugParam)}?start=${s}&end=${e}&cstart=${cs}&cend=${ce}&store=${encodeURIComponent(STORE)}`;
   if (cat) url += `&category=${encodeURIComponent(cat)}`;
+  if (selectedJourneys.size > 0) url += `&journeys=${encodeURIComponent([...selectedJourneys].join(','))}`;
   if (selectedCollection) url += `&collection=${encodeURIComponent(selectedCollection)}`;
   if (selectedProductLine) url += `&product_line=${encodeURIComponent(selectedProductLine)}`;
   const _st = document.getElementById('startTime')?.value || '00:00';
@@ -1389,7 +1476,7 @@ function renderCategoryChart() {
   charts.cat = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: cat.map(x => x.category),
+      labels: cat.map(x => x.category || 'Unclassified'),
       datasets: [{
         data: cat.map(x => x.revenue),
         backgroundColor: PALETTE,
