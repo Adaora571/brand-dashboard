@@ -1879,6 +1879,12 @@ function sortMfrTable(col) {
 
 function renderProducts() {
   currentProducts = allData.products || [];
+  // Pack-size stores: compact display — "Stück"/"Stueck" → "St" so the badge stays on one line
+  if (FEATURES.variant_detail) {
+    currentProducts = currentProducts.map(p => p.category
+      ? { ...p, category: p.category.replace(/st(ü|ue)ck/gi, 'St').replace(/\s+/g, ' ').trim() }
+      : p);
+  }
   if (!currentProducts.length) {
     document.getElementById('prodTableEl').style.display = 'none';
     return;
@@ -1967,7 +1973,7 @@ function renderProductTable() {
     return `<tr>
       <td style="font-weight:500;max-width:280px">${prod.name || '—'}</td>
       <td>${prod.brand || '—'}</td>
-      <td><span class="tag ${catClass}">${prod.category || '—'}</span>${prod.pzn ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;">PZN ${prod.pzn}</div>` : ''}</td>
+      <td><span class="tag ${catClass}" style="white-space:nowrap">${prod.category || '—'}</span>${prod.pzn ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;">${prod.pzn}</div>` : ''}</td>
       <td>${prod.origin || '—'}</td>
       <td class="r">${formatNum(prod.num_rx)}</td>
       <td class="r">${formatNum(prod.volume, 0)}</td>
