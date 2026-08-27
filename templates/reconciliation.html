@@ -140,6 +140,8 @@
   .kpi-card .change.up, .kpi-card .change .up { color:var(--green); }
   .kpi-card .change.down, .kpi-card .change .down { color:var(--red); }
   .kpi-card .kpi-desc { font-size:11px; color:#94a3b8; margin-top:4px; }
+  .kpi-card .value-sub { font-size:15px; font-weight:700; margin-top:8px; color:var(--text); }
+  .kpi-card .value-sub .unit { font-size:11px; font-weight:600; color:var(--muted); }
   .chart-box { height:280px; position:relative; }
   .chart-box canvas { width:100%!important; height:100%!important; }
 
@@ -415,7 +417,7 @@
 <div class="grid grid-6" style="margin-top:16px;">
   <div class="card kpi-card accent-red"><div class="label">Total Patients</div><div class="value" id="k-pat">—</div><div class="change" id="k-pat-chg"></div><div class="kpi-desc">Unique customers</div></div>
   <div class="card kpi-card accent-green"><div class="label">Avg € / Gram</div><div class="value" id="k-epg">—</div><div class="change" id="k-epg-chg"></div><div class="kpi-desc">Net Rev / Volume</div></div>
-  <div class="card kpi-card accent-purple"><div class="label">Avg Order Value</div><div class="value" id="k-aov">—</div><div class="change" id="k-aov-chg"></div><div class="kpi-desc">Revenue / Orders</div></div>
+  <div class="card kpi-card accent-purple"><div class="label">Avg Order Value</div><div class="value" id="k-aov">—</div><div class="change" id="k-aov-chg"></div><div class="value-sub" id="k-aov-vol">—</div><div class="change" id="k-aov-vol-chg"></div><div class="kpi-desc">Revenue / Orders</div></div>
   <div class="card kpi-card accent-teal"><div class="label">Repeat Purchase Rate</div><div class="value" id="k-rpr">—</div><div class="change" id="k-rpr-chg"></div><div class="kpi-desc">Patients w/ 2+ orders</div></div>
   <div class="card kpi-card accent-blue"><div class="label">Avg Products / Order</div><div class="value" id="k-ppo">—</div><div class="kpi-desc">Products per order</div></div>
   <div class="card kpi-card accent-red"><div class="label">Top 3 SKU Conc.</div><div class="value" id="k-sku3">—</div><div class="kpi-desc">% rev from top 3 products</div></div>
@@ -1026,6 +1028,11 @@ function renderKPIs() {
   document.getElementById('k-epg-chg').innerHTML = formatChange(kpi.epg, kpiC.epg);
   document.getElementById('k-aov').textContent = formatCurr(kpi.aov || 0);
   document.getElementById('k-aov-chg').innerHTML = formatChange(kpi.aov, kpiC.aov);
+  // AOV in volume: avg units (or g) per order, inside the same card
+  const aovVolUnit = getUnitLabel() === 'g' ? 'g' : 'units';
+  document.getElementById('k-aov-vol').innerHTML = kpi.aov_volume != null
+    ? `${(kpi.aov_volume || 0).toFixed(1)} <span class="unit">${aovVolUnit}/order</span>` : '—';
+  document.getElementById('k-aov-vol-chg').innerHTML = formatChange(kpi.aov_volume, kpiC.aov_volume);
   document.getElementById('k-pat').textContent = formatNum(kpi.num_patients);
   document.getElementById('k-pat-chg').innerHTML = formatChange(kpi.num_patients, kpiC.num_patients);
   document.getElementById('k-rpr').textContent = formatPct(kpi.repeat_rate);

@@ -1012,7 +1012,8 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
         COUNT(DISTINCT o.customer_id) AS total_patients,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
-        SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value
+        SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
+        SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_prescription
       FROM `{PROJECT_DATASET}.order_items` oi
       JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
@@ -1042,7 +1043,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
       c.*, p.prescriptions AS prev_rx, p.revenue_eur AS prev_rev,
       p.sales_volume_g AS prev_vol, p.net_revenue_eur AS prev_net,
       p.total_patients AS prev_patients, p.avg_eur_per_g AS prev_epg,
-      p.avg_order_value AS prev_aov,
+      p.avg_order_value AS prev_aov, p.avg_g_per_prescription AS prev_gpo,
       rp.repeat_purchase_rate, pr.repeat_purchase_rate AS prev_repeat_rate
     FROM curr c, prev p, repeat_stats rp, prev_repeat pr
     """
@@ -1084,6 +1085,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "total_patients": r.get("prev_patients"),
             "avg_eur_per_g": r.get("prev_epg"),
             "avg_order_value": r.get("prev_aov"),
+            "avg_g_per_prescription": r.get("prev_gpo"),
             "repeat_purchase_rate": r.get("prev_repeat_rate"),
         },
         "growth": {
@@ -1094,6 +1096,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "total_patients": safe_growth(r.get("total_patients"), r.get("prev_patients")),
             "avg_eur_per_g": safe_growth(r.get("avg_eur_per_g"), r.get("prev_epg")),
             "avg_order_value": safe_growth(r.get("avg_order_value"), r.get("prev_aov")),
+            "avg_g_per_prescription": safe_growth(r.get("avg_g_per_prescription"), r.get("prev_gpo")),
             "repeat_purchase_rate": safe_growth(r.get("repeat_purchase_rate"), r.get("prev_repeat_rate")),
         },
         "fee": {"amount": fee_amount},
@@ -1744,6 +1747,7 @@ async def api_recon_combined(
         "ppo": cur.get("avg_products_per_order"),
         "epg": cur.get("avg_eur_per_g"),
         "aov": cur.get("avg_order_value"),
+        "aov_volume": cur.get("avg_g_per_prescription"),
         "num_patients": cur.get("total_patients"),
         "repeat_rate": cur.get("repeat_purchase_rate"),
         "market_share": market_share,
@@ -1759,6 +1763,7 @@ async def api_recon_combined(
         "num_patients": prev_data.get("total_patients"),
         "epg": prev_data.get("avg_eur_per_g"),
         "aov": prev_data.get("avg_order_value"),
+        "aov_volume": prev_data.get("avg_g_per_prescription"),
         "repeat_rate": prev_data.get("repeat_purchase_rate"),
     }]
 
