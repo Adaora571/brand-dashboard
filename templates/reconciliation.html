@@ -551,8 +551,8 @@
     <select class="filter-select" id="filterBrand" onchange="applyProductFilters()"><option value="">All Product Lines</option></select>
   </div>
   <div class="filter-group">
-    <label>Category</label>
-    <select class="filter-select" id="filterCategory" onchange="applyProductFilters()"><option value="">All Categories</option></select>
+    <label>{{ 'Pack Size' if features.variant_detail else 'Category' }}</label>
+    <select class="filter-select" id="filterCategory" onchange="applyProductFilters()"><option value="">{{ 'All Pack Sizes' if features.variant_detail else 'All Categories' }}</option></select>
   </div>
   <div class="filter-group">
     <label>Origin</label>
@@ -581,7 +581,7 @@
       <tr>
         <th style="overflow:visible;white-space:normal;">Product <button class="col-filter-btn" onclick="openColFilter(event,'prod',0)">▼</button></th>
         <th style="overflow:hidden;text-overflow:ellipsis;">Brand <button class="col-filter-btn" onclick="openColFilter(event,'prod',1)">▼</button></th>
-        <th>Category <button class="col-filter-btn" onclick="openColFilter(event,'prod',2)">▼</button></th>
+        <th>{{ 'Pack Size' if features.variant_detail else 'Category' }} <button class="col-filter-btn" onclick="openColFilter(event,'prod',2)">▼</button></th>
         <th>Origin <button class="col-filter-btn" onclick="openColFilter(event,'prod',3)">▼</button></th>
         <th class="r"># Rx <button class="col-filter-btn" onclick="openColFilter(event,'prod',4)">▼</button></th>
         <th class="r" id="thVolume">Vol (g) <button class="col-filter-btn" onclick="openColFilter(event,'prod',5)">▼</button></th>
@@ -1915,7 +1915,7 @@ function renderProducts() {
   if (selectedProductLine) document.getElementById('filterBrand').value = selectedProductLine;
   const categories = [...new Set(currentProducts.map(p=>p.category).filter(Boolean))].sort();
   const origins = [...new Set(currentProducts.map(p=>p.origin).filter(Boolean))].sort();
-  populateSelect('filterCategory', categories, 'All Categories');
+  populateSelect('filterCategory', categories, FEATURES.variant_detail ? 'All Pack Sizes' : 'All Categories');
   populateSelect('filterOrigin', origins, 'All Origins');
 
   // Populate region filter from patient data if available
@@ -1967,7 +1967,7 @@ function renderProductTable() {
     return `<tr>
       <td style="font-weight:500;max-width:280px">${prod.name || '—'}</td>
       <td>${prod.brand || '—'}</td>
-      <td><span class="tag ${catClass}">${prod.category || '—'}</span></td>
+      <td><span class="tag ${catClass}">${prod.category || '—'}</span>${prod.pzn ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;">PZN ${prod.pzn}</div>` : ''}</td>
       <td>${prod.origin || '—'}</td>
       <td class="r">${formatNum(prod.num_rx)}</td>
       <td class="r">${formatNum(prod.volume, 0)}</td>

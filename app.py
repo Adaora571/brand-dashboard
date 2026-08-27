@@ -742,15 +742,20 @@ STORES = {
         "shop_where": "",  # single-store dataset, no shop_id column
         "source_shopify": _SOURCE_SHOPIFY_DATASET,
         "features": {"categories": True, "collections": True, "journeys": False,
-                     "targets": True, "fees": True, "config_brands": True},
+                     "targets": True, "fees": True, "config_brands": True,
+                     "variant_detail": False},
     },
     "prio-one": {
         "label": "PRIO ONE",
         "dataset": f"{_BQ_PROJECT}.datamarts_unified",
         "shop_where": "AND o.shop_id = 'prio_one'",
         "source_shopify": f"{_BQ_PROJECT}.source_shopify_prio_one",
+        # variant_detail: pharmacy products come in pack sizes (126 St., 63 St.)
+        # with their own PZN — the products table breaks down by variant and
+        # shows pack size + PZN in place of the (empty) category column.
         "features": {"categories": False, "collections": False, "journeys": True,
-                     "targets": False, "fees": False, "config_brands": False},
+                     "targets": False, "fees": False, "config_brands": False,
+                     "variant_detail": True},
     },
 }
 
@@ -758,6 +763,39 @@ STORES = {
 def store_cfg(store: str) -> dict:
     """Resolve a store key to its config, defaulting to nordleaf."""
     return STORES.get(store if store in STORES else "nordleaf")
+
+
+# ── Manufacturer fallbacks ───────────────────────────────────
+# Some products aren't tagged with a manufacturer in Shopify yet (they land
+# in "Unknown"). Per-store fallback rules map them by product-name prefix.
+# COALESCE order = the Shopify value wins as soon as it's filled in, so this
+# fix retires itself once the store data is corrected.
+MANUFACTURER_FALLBACKS = {
+    "prio-one": [
+        ("Dilaya", "NextGen Pharma"),
+        ("Junaya", "NextGen Pharma"),
+        ("Lyviana", "NextGen Pharma"),
+    ],
+}
+
+
+def manufacturer_expr(store: str) -> str:
+    """SQL expression for the manufacturer name incl. per-store fallbacks."""
+    rules = MANUFACTURER_FALLBACKS.get(store)
+    if not rules:
+        return "oi.product_manufacturer_name"
+
+    def esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("'", "\\'")
+
+    whens = " ".join(
+        f"WHEN STARTS_WITH(oi.product_name, '{esc(prefix)}') THEN '{esc(mfg)}'"
+        for prefix, mfg in rules
+    )
+    return (
+        "COALESCE(NULLIF(TRIM(oi.product_manufacturer_name), ''), "
+        f"CASE {whens} ELSE NULL END)"
+    )
 
 
 def canon_products_cte(store: str = "nordleaf") -> str:
@@ -1042,6 +1080,10 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
     if _cfg["shop_where"]:
         mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
+    _mfg_x = manufacturer_expr(store)
+    if _mfg_x != "oi.product_manufacturer_name":
+        # apply manufacturer fallbacks to brand filters too
+        mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
 
     sql = f"""
     WITH curr AS (
@@ -1215,6 +1257,10 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
     if _cfg["shop_where"]:
         mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
+    _mfg_x = manufacturer_expr(store)
+    if _mfg_x != "oi.product_manufacturer_name":
+        # apply manufacturer fallbacks to brand filters too
+        mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
 
     sql = f"""
     SELECT
@@ -1274,6 +1320,10 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
     if _cfg["shop_where"]:
         mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
+    _mfg_x = manufacturer_expr(store)
+    if _mfg_x != "oi.product_manufacturer_name":
+        # apply manufacturer fallbacks to brand filters too
+        mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
 
     extra_where = ""
     extra_params = []
@@ -1292,13 +1342,31 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
         extra_where += " AND oi.product_country_or_origin = @origin"
         extra_params.append(bigquery.ScalarQueryParameter("origin", "STRING", origin))
 
+    # Pharmacy stores (variant_detail): break the table down by pack size —
+    # the "category" field carries the variant title (e.g. "126 St."), plus
+    # the PZN from the Shopify variant SKU when present.
+    if store_cfg(store)["features"].get("variant_detail"):
+        _src = store_cfg(store)["source_shopify"]
+        _cat_expr = ("CASE WHEN oi.product_variant_name IS NULL "
+                     "OR TRIM(oi.product_variant_name) IN ('', 'Default Title') "
+                     "THEN NULL ELSE TRIM(oi.product_variant_name) END")
+        _variant_join = (f"LEFT JOIN (SELECT * FROM `{_src}.product_variants` "
+                         "QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) sv "
+                         "ON CAST(sv.id AS STRING) = oi.product_variant_id")
+        _pzn_select = "MAX(sv.sku) AS pzn,"
+    else:
+        _cat_expr = f"({CATEGORY_EXPR})"
+        _variant_join = ""
+        _pzn_select = ""
+
     sql = f"""
     WITH {canon_products_cte(store)}
     SELECT
       {CANONICAL_NAME_EXPR} AS product_name,
       MAX(oi.product_brand_name) AS product_brand_name,
-      MAX(oi.product_manufacturer_name) AS product_manufacturer_name,
-      ({CATEGORY_EXPR}) AS category,
+      MAX({_mfg_x}) AS product_manufacturer_name,
+      {_pzn_select}
+      {_cat_expr} AS category,
       oi.product_country_or_origin AS origin,
       COUNT(DISTINCT o.order_id) AS prescriptions,
       SUM(oi.quantity_after_cancellations) AS volume_g,
@@ -1309,8 +1377,9 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     LEFT JOIN canon_products cn ON cn.product_id = oi.product_id
+    {_variant_join}
     WHERE {mfg_where} {date_where} {extra_where} {NET_ORDER_FILTER}
-    GROUP BY 1,4,5
+    GROUP BY product_name, category, origin
     ORDER BY revenue_eur DESC
     """
     params = mfg_p + date_p + extra_params
@@ -1375,6 +1444,10 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
     if _cfg["shop_where"]:
         mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
+    _mfg_x = manufacturer_expr(store)
+    if _mfg_x != "oi.product_manufacturer_name":
+        # apply manufacturer fallbacks to brand filters too
+        mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
     base_params = mfg_p + date_p
 
     cat_sql = f"""
@@ -1428,7 +1501,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     GROUP BY 1 ORDER BY net_revenue_eur DESC
     """
     mfr_sql = f"""
-    SELECT COALESCE(oi.product_manufacturer_name, 'Unknown') AS manufacturer,
+    SELECT COALESCE({_mfg_x}, 'Unknown') AS manufacturer,
       SUM(oi.quantity_after_cancellations) AS volume_units,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
@@ -1485,6 +1558,10 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
     if _cfg["shop_where"]:
         mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
+    _mfg_x = manufacturer_expr(store)
+    if _mfg_x != "oi.product_manufacturer_name":
+        # apply manufacturer fallbacks to brand filters too
+        mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
     base_params = mfg_p + date_p
 
     fo_cte = f"""
@@ -1598,6 +1675,10 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
     if _cfg["shop_where"]:
         mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
+    _mfg_x = manufacturer_expr(store)
+    if _mfg_x != "oi.product_manufacturer_name":
+        # apply manufacturer fallbacks to brand filters too
+        mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
 
     sql = f"""
     SELECT
@@ -1630,6 +1711,10 @@ async def _get_categories(mfg_name: str, store: str = "nordleaf"):
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
     if _cfg["shop_where"]:
         mfg_where = f"({mfg_where}) {_cfg['shop_where']}"
+    _mfg_x = manufacturer_expr(store)
+    if _mfg_x != "oi.product_manufacturer_name":
+        # apply manufacturer fallbacks to brand filters too
+        mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
     sql = f"""
     SELECT DISTINCT ({CATEGORY_EXPR}) AS category
     FROM `{_DS}.order_items` oi
@@ -1818,6 +1903,8 @@ async def api_recon_journeys(request: Request, store: str = "prio-one"):
     rows = run_query(sql, [])
     member_sql = f"SELECT DISTINCT CAST(collection_id AS STRING) AS cid FROM `{src}.collects`"
     member_ids = {r["cid"] for r in run_query(member_sql, [])}
+    smart_sql = f"SELECT DISTINCT CAST(id AS STRING) AS id, title FROM `{src}.smart_collections`"
+    smart_ids = {r["id"] for r in run_query(smart_sql, [])}
     journeys = [
         {"id": r["id"], "title": r["title"]}
         for r in rows
@@ -1825,6 +1912,16 @@ async def api_recon_journeys(request: Request, store: str = "prio-one"):
     ]
     journeys.sort(key=lambda j: j["title"].lower())
     result = {"journeys": journeys}
+    # Diagnostic view: every collection with its type/membership flags
+    if request.query_params.get("all"):
+        allc = [
+            {"id": r["id"], "title": r["title"],
+             "has_members": r["id"] in member_ids,
+             "smart": r["id"] in smart_ids}
+            for r in rows
+        ]
+        allc.sort(key=lambda c: c["title"].lower())
+        return {"journeys": journeys, "all_collections": allc}
     cache_set(ck, result)
     return result
 
@@ -2122,6 +2219,7 @@ async def api_recon_combined(
         "name": r.get("product_name"),
         "brand": r.get("product_brand_name"),
         "category": r.get("category"),
+        "pzn": r.get("pzn"),
         "origin": r.get("origin"),
         "num_rx": r.get("prescriptions"),
         "volume": r.get("volume_g"),
