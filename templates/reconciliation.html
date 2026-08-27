@@ -287,6 +287,11 @@
   }
   .compare-custom-dates input[type=date]:focus { border-color:var(--accent); box-shadow:0 0 0 2px rgba(5,137,211,0.1); }
 
+  /* Row highlighting: click a row in the manufacturer or product table to mark it */
+  tr[data-hlkey] { cursor:pointer; }
+  tr[data-hlkey]:hover td { background:#f8fafc; }
+  tr.hl-row td, tr.hl-row:hover td { background:#fff3bf !important; }
+
   @media (max-width:1100px) {
     .grid-6 { grid-template-columns: repeat(3, 1fr); }
     .grid-5 { grid-template-columns: repeat(3, 1fr); }
@@ -1780,6 +1785,32 @@ function renderRegionChart() {
 let mfrSortCol = 'net_revenue_eur';
 let mfrSortAsc = false;
 
+// ── Row highlighting (click to toggle; persisted per store+table in this browser) ──
+function hlLoad(table) {
+  try { return new Set(JSON.parse(localStorage.getItem(`hl_${table}_${STORE}`) || '[]')); }
+  catch (e) { return new Set(); }
+}
+function hlSave(table, set) {
+  try { localStorage.setItem(`hl_${table}_${STORE}`, JSON.stringify([...set])); } catch (e) {}
+}
+const hlSets = { mfr: hlLoad('mfr'), prod: hlLoad('prod') };
+function hlAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+function attachHlHandler(tbodyId, table) {
+  const tb = document.getElementById(tbodyId);
+  if (!tb || tb._hlBound) return;
+  tb._hlBound = true;
+  tb.addEventListener('click', e => {
+    const tr = e.target.closest('tr');
+    if (!tr || !tr.dataset.hlkey) return;
+    const s = hlSets[table];
+    if (s.has(tr.dataset.hlkey)) { s.delete(tr.dataset.hlkey); tr.classList.remove('hl-row'); }
+    else { s.add(tr.dataset.hlkey); tr.classList.add('hl-row'); }
+    hlSave(table, s);
+  });
+}
+
 function renderManufacturerTable() {
   if (selectedBrands.size === 1) return;  // only show manufacturer table for multi/all brand view
   const mfrs = allData.manufacturers || [];
@@ -1836,7 +1867,7 @@ function renderManufacturerTable() {
       achievedCell = '—';
     }
 
-    return `<tr>
+    return `<tr data-hlkey="${hlAttr(r.manufacturer)}"${hlSets.mfr.has(String(r.manufacturer)) ? ' class="hl-row"' : ''}>
       <td style="font-weight:600;">${r.manufacturer}</td>
       <td class="r">${Math.round(r.volume_units || 0).toLocaleString('en-US')}</td>
       <td class="r">€${Math.round(r.net_revenue_eur || 0).toLocaleString('en-US')}</td>
@@ -1845,6 +1876,7 @@ function renderManufacturerTable() {
       <td class="r">${achievedCell}</td>
     </tr>`;
   }).join('');
+  attachHlHandler('mfrBody', 'mfr');
 
   // Footer totals
   let footTargetCell = '—';
@@ -1986,7 +2018,8 @@ function renderProductTable() {
   const tbody = document.getElementById('prodBody');
   tbody.innerHTML = sorted.map(prod => {
     const catClass = (prod.category||'').toLowerCase().includes('flower') ? 'fl' : ((prod.category||'').toLowerCase().includes('extract') ? 'ex' : 'ot');
-    return `<tr>
+    const hlKey = [prod.name, prod.category, prod.pzn, prod.origin].map(v => v || '').join('|');
+    return `<tr data-hlkey="${hlAttr(hlKey)}"${hlSets.prod.has(hlKey) ? ' class="hl-row"' : ''}>
       <td style="font-weight:500;max-width:280px">${prod.name || '—'}</td>
       <td>${prod.brand || '—'}</td>
       <td><span class="tag ${catClass}" style="white-space:nowrap">${prod.category || '—'}</span>${prod.pzn ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;">${prod.pzn}</div>` : ''}</td>
@@ -1999,6 +2032,7 @@ function renderProductTable() {
       <td class="r">${(prod.gpx || 0).toFixed(1)}</td>
     </tr>`;
   }).join('');
+  attachHlHandler('prodBody', 'prod');
 }
 
 function applyProductFilters() {
