@@ -2017,7 +2017,8 @@ async def api_recon_journeys(request: Request, store: str = "prio-one"):
             {"id": r["id"], "title": r["title"],
              "has_members": r["id"] in member_ids,
              "smart": r["id"] in smart_specs,
-             "rules_supported": bool(_smart_membership_sql(store, smart_specs.get(r["id"]))) if r["id"] in smart_specs else None}
+             "rules_supported": bool(_smart_membership_sql(store, smart_specs.get(r["id"]))) if r["id"] in smart_specs else None,
+             "rules": (smart_specs.get(r["id"]) or {}).get("rules") if r["id"] in smart_specs else None}
             for r in rows
         ]
         allc.sort(key=lambda c: c["title"].lower())
