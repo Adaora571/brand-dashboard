@@ -6,7 +6,7 @@ Queries BigQuery live data and serves per-manufacturer dashboards.
   edit the MANUFACTURER_FEES dict below. No other code changes needed.
 """
 
-import os, json, hashlib, hmac, logging, asyncio, time, secrets, re
+import os, json, hashlib, hmac, logging, asyncio, time, secrets, re, ast
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -814,17 +814,112 @@ def canon_products_cte(store: str = "nordleaf") -> str:
 # the source data; the filter matches order items whose product belongs
 # to ANY selected collection (membership via the `collects` table).
 JOURNEYS_TOKEN = "__journeys__"
-JOURNEY_EXCLUDE_TITLES = {"apo.com products", "apocom", "AFA Pharmacy"}
+JOURNEY_EXCLUDE_TITLES = {"apo.com products", "apocom", "AFA Pharmacy",
+                          "PayPal Excluded", "Sets"}
+
+
+def _smart_collection_specs(store: str) -> dict:
+    """id → {"disjunctive": bool, "rules": [dict]} for the store's smart
+    collections (latest snapshot). Rules arrive as stringified dicts in the
+    source data; parsed with ast.literal_eval. Cached."""
+    ck = cache_key("smart_specs", store=store)
+    cached = cache_get(ck)
+    if cached is not None:
+        return cached
+    src = store_cfg(store)["source_shopify"]
+    sql = f"""
+    SELECT CAST(id AS STRING) AS id,
+           LOWER(CAST(disjunctive AS STRING)) AS disj,
+           TO_JSON_STRING(rules) AS rules
+    FROM `{src}.smart_collections`
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
+    """
+    out = {}
+    for r in run_query(sql, []):
+        try:
+            raw = json.loads(r["rules"] or "[]")
+            rules = []
+            for item in raw:
+                if isinstance(item, str):
+                    item = ast.literal_eval(item)
+                if isinstance(item, dict):
+                    rules.append(item)
+            out[r["id"]] = {"disjunctive": r["disj"] == "true", "rules": rules}
+        except Exception:
+            out[r["id"]] = {"disjunctive": False, "rules": None}
+    cache_set(ck, out)
+    return out
+
+
+def _smart_rule_sql(store: str, rule: dict):
+    """Translate one Shopify smart-collection rule into SQL over the latest
+    products snapshot (alias p). Returns None for unsupported rules."""
+    src = store_cfg(store)["source_shopify"]
+
+    def esc(s: str) -> str:
+        return str(s).replace("\\", "\\\\").replace("'", "\\'")
+
+    col, rel = rule.get("column"), rule.get("relation")
+    cond = str(rule.get("condition", ""))
+    if col == "variant_price" and rel in ("less_than", "greater_than", "equals"):
+        try:
+            val = float(cond)
+        except ValueError:
+            return None
+        op = {"less_than": "<", "greater_than": ">", "equals": "="}[rel]
+        return (f"EXISTS (SELECT 1 FROM (SELECT * FROM `{src}.product_variants` "
+                "QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) v "
+                f"WHERE v.product_id = p.id AND SAFE_CAST(v.price AS FLOAT64) {op} {val})")
+    if col == "title" and rel in ("contains", "not_contains", "equals"):
+        if rel == "equals":
+            return f"p.title = '{esc(cond)}'"
+        neg = "= 0" if rel == "not_contains" else "> 0"
+        return f"STRPOS(LOWER(p.title), LOWER('{esc(cond)}')) {neg}"
+    if col in ("type", "product_type") and rel == "equals":
+        return f"p.product_type = '{esc(cond)}'"
+    if col == "vendor" and rel == "equals":
+        return f"p.vendor = '{esc(cond)}'"
+    if col == "tag" and rel == "equals":
+        pat = re.escape(cond).replace("'", "\\'")
+        return f"REGEXP_CONTAINS(COALESCE(p.tags, ''), r'(^|,)\\s*{pat}\\s*($|,)')"
+    return None
+
+
+def _smart_membership_sql(store: str, spec: dict):
+    """Subquery returning product ids matching a smart collection's rules,
+    or None if any rule is unsupported."""
+    if not spec or not spec.get("rules"):
+        return None
+    src = store_cfg(store)["source_shopify"]
+    parts = [_smart_rule_sql(store, r) for r in spec["rules"]]
+    if any(p is None for p in parts):
+        return None
+    joiner = " OR " if spec["disjunctive"] else " AND "
+    return (f"SELECT CAST(p.id AS STRING) FROM (SELECT * FROM `{src}.products` "
+            "QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) p "
+            f"WHERE UPPER(p.status) = 'ACTIVE' AND ({joiner.join(parts)})")
 
 
 def _journeys_filter_sql(journey_ids: list, param_name: str = "journey_ids") -> tuple[str, list]:
-    """Filter order items to products in any of the given Prio One collections."""
-    src = store_cfg("prio-one")["source_shopify"]
-    sql = (
-        f"oi.product_id IN (SELECT CAST(product_id AS STRING) "
-        f"FROM `{src}.collects` WHERE collection_id IN UNNEST(@{param_name}))"
-    )
-    return sql, [bigquery.ArrayQueryParameter(param_name, "INT64", [int(j) for j in journey_ids])]
+    """Filter order items to products in ANY of the given Prio One collections.
+    Custom collections match via `collects`; smart collections via their rules."""
+    store = "prio-one"
+    src = store_cfg(store)["source_shopify"]
+    specs = _smart_collection_specs(store)
+    smart_ids = [str(j) for j in journey_ids if str(j) in specs]
+    custom_ids = [int(j) for j in journey_ids if str(j) not in specs]
+    ors, params = [], []
+    if custom_ids:
+        ors.append(f"oi.product_id IN (SELECT CAST(product_id AS STRING) "
+                   f"FROM `{src}.collects` WHERE collection_id IN UNNEST(@{param_name}))")
+        params.append(bigquery.ArrayQueryParameter(param_name, "INT64", custom_ids))
+    for sid in smart_ids:
+        msql = _smart_membership_sql(store, specs.get(sid))
+        if msql:
+            ors.append(f"oi.product_id IN ({msql})")
+    if not ors:
+        return "TRUE", []
+    return "(" + " OR ".join(ors) + ")", params
 
 
 def _cat_filter_sql(category: str, param_name: str = "category") -> tuple[str, list]:
@@ -1904,13 +1999,16 @@ async def api_recon_journeys(request: Request, store: str = "prio-one"):
     rows = run_query(sql, [])
     member_sql = f"SELECT DISTINCT CAST(collection_id AS STRING) AS cid FROM `{src}.collects`"
     member_ids = {r["cid"] for r in run_query(member_sql, [])}
-    smart_sql = f"SELECT DISTINCT CAST(id AS STRING) AS id, title FROM `{src}.smart_collections`"
-    smart_ids = {r["id"] for r in run_query(smart_sql, [])}
-    journeys = [
-        {"id": r["id"], "title": r["title"]}
-        for r in rows
-        if r["id"] in member_ids and r["title"] not in JOURNEY_EXCLUDE_TITLES
-    ]
+    smart_specs = _smart_collection_specs(store)
+    journeys = []
+    for r in rows:
+        if r["title"] in JOURNEY_EXCLUDE_TITLES:
+            continue
+        if r["id"] in member_ids:
+            journeys.append({"id": r["id"], "title": r["title"]})
+        elif r["id"] in smart_specs and _smart_membership_sql(store, smart_specs[r["id"]]):
+            # smart collection whose rules we can evaluate live
+            journeys.append({"id": r["id"], "title": r["title"]})
     journeys.sort(key=lambda j: j["title"].lower())
     result = {"journeys": journeys}
     # Diagnostic view: every collection with its type/membership flags
@@ -1918,7 +2016,8 @@ async def api_recon_journeys(request: Request, store: str = "prio-one"):
         allc = [
             {"id": r["id"], "title": r["title"],
              "has_members": r["id"] in member_ids,
-             "smart": r["id"] in smart_ids}
+             "smart": r["id"] in smart_specs,
+             "rules_supported": bool(_smart_membership_sql(store, smart_specs.get(r["id"]))) if r["id"] in smart_specs else None}
             for r in rows
         ]
         allc.sort(key=lambda c: c["title"].lower())
