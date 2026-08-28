@@ -7,7 +7,8 @@ Queries BigQuery live data and serves per-manufacturer dashboards.
 """
 
 import os, json, hashlib, hmac, logging, asyncio, time, secrets, re, ast
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,10 +21,42 @@ from google.oauth2 import service_account
 logger = logging.getLogger("brand-dashboard")
 
 # ============================================================
-# IN-MEMORY CACHE (TTL-based)
+# IN-MEMORY CACHE — entries stay valid until the next DWH refresh.
+# The warehouse only refreshes at fixed Berlin hours, so data cannot
+# change between refreshes; anything cached after the last refresh
+# boundary is still current. The ⟳ button (nocache=1) always bypasses.
 # ============================================================
-CACHE_TTL = 300  # 5 minutes
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
+DWH_REFRESH_HOURS = (7, 9, 11, 13, 15, 17, 19, 21, 23)
+DWH_GRACE_MIN = 10  # refresh output lands shortly after the hour
 _cache: dict[str, tuple[float, any]] = {}
+
+
+def _last_refresh_epoch() -> float:
+    """Epoch of the most recent DWH refresh boundary (refresh hour + grace,
+    Berlin). Cache entries written before this are stale."""
+    now = datetime.now(BERLIN_TZ)
+    best = None
+    for d in (0, 1):
+        day = (now - timedelta(days=d)).date()
+        for h in DWH_REFRESH_HOURS:
+            t = datetime(day.year, day.month, day.day, h, DWH_GRACE_MIN, tzinfo=BERLIN_TZ)
+            if t <= now and (best is None or t > best):
+                best = t
+    return best.timestamp() if best else 0.0
+
+
+def _next_refresh_dt() -> datetime:
+    """Berlin datetime of the next DWH refresh boundary (+grace)."""
+    now = datetime.now(BERLIN_TZ)
+    nxt = None
+    for d in (0, 1):
+        day = (now + timedelta(days=d)).date()
+        for h in DWH_REFRESH_HOURS:
+            t = datetime(day.year, day.month, day.day, h, DWH_GRACE_MIN, tzinfo=BERLIN_TZ)
+            if t > now and (nxt is None or t < nxt):
+                nxt = t
+    return nxt
 
 
 def cache_key(endpoint: str, **kwargs) -> str:
@@ -33,9 +66,9 @@ def cache_key(endpoint: str, **kwargs) -> str:
 
 
 def cache_get(key: str):
-    """Return cached value if still fresh, else None."""
+    """Return cached value if written after the last DWH refresh, else None."""
     entry = _cache.get(key)
-    if entry and (time.time() - entry[0]) < CACHE_TTL:
+    if entry and entry[0] >= _last_refresh_epoch():
         return entry[1]
     return None
 
@@ -54,6 +87,16 @@ class BigQueryError(Exception):
 
 
 app = FastAPI(title="HTV Brand Dashboard")
+
+# Per-process token the in-app cache warmer uses to call its own endpoints
+# without a login session. Random each start — never leaves this process.
+WARM_TOKEN = secrets.token_hex(16)
+
+
+def _recon_authed(request: Request) -> bool:
+    """True for a logged-in recon session or the internal cache warmer."""
+    return bool(request.session.get("recon_auth")) or \
+        request.headers.get("x-warm-token") == WARM_TOKEN
 templates = Jinja2Templates(directory="templates")
 
 # Mount static files (logos, etc.)
@@ -1955,7 +1998,7 @@ async def recon_logout(request: Request):
 async def api_recon_manufacturers(request: Request, store: str = "nordleaf"):
     """Distinct manufacturer names present in a store's data (for stores
     without a configured brand list, e.g. Prio One)."""
-    if not request.session.get("recon_auth"):
+    if not _recon_authed(request):
         raise HTTPException(status_code=403, detail="Not authenticated")
     store = store if store in STORES else "nordleaf"
     cfg = store_cfg(store)
@@ -1986,7 +2029,7 @@ async def api_recon_journeys(request: Request, store: str = "prio-one"):
     (latest snapshot per id) that have product members, minus channel-type
     collections. Live from the source data — new collections appear
     automatically after the next sync."""
-    if not request.session.get("recon_auth"):
+    if not _recon_authed(request):
         raise HTTPException(status_code=403, detail="Not authenticated")
     store = store if store in STORES else "prio-one"
     cfg = store_cfg(store)
@@ -2058,7 +2101,7 @@ async def api_recon_combined(
     applied to the date range, Shopify-style. The default 00:00/23:59 pair
     is treated as "whole days" (legacy behaviour).
     """
-    if not request.session.get("recon_auth"):
+    if not _recon_authed(request):
         raise HTTPException(status_code=403, detail="Not authenticated")
 
     store = store if store in STORES else "nordleaf"
@@ -2459,7 +2502,7 @@ async def api_recon_pricing(request: Request, slug: str, start_date: str = "", e
 @app.get("/api/recon/{slug}/categories")
 async def api_recon_categories(request: Request, slug: str):
     """Reconciliation API — categories for any brand (requires recon auth)."""
-    if not request.session.get("recon_auth"):
+    if not _recon_authed(request):
         raise HTTPException(status_code=403, detail="Not authenticated")
     if slug == "all":
         mfg_name = None
@@ -2516,3 +2559,59 @@ async def data_freshness():
         "checked_at": datetime.now().isoformat(),
     }
 
+
+
+# ============================================================
+# CACHE WARMER — after each DWH refresh (and on startup), pre-load
+# the default views so the first visitor gets an instant cached
+# response instead of waiting on BigQuery.
+# ============================================================
+def _default_range() -> tuple[str, str, str, str]:
+    """Default dashboard range (quarter-to-date, Berlin) plus its
+    'previous period' comparison — mirrors the frontend defaults."""
+    today = datetime.now(BERLIN_TZ).date()
+    qstart = date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
+    dayspan = (today - qstart).days
+    cend = qstart - timedelta(days=1)
+    cstart = qstart - timedelta(days=dayspan + 1)
+    return str(qstart), str(today), str(cstart), str(cend)
+
+
+async def _warm_default_views():
+    import requests as _rq
+    port = os.environ.get("PORT", "10000")
+    base = f"http://127.0.0.1:{port}"
+    hdr = {"x-warm-token": WARM_TOKEN}
+    s, e, cs, ce = _default_range()
+    urls = []
+    for store, cfg in STORES.items():
+        urls.append(f"{base}/api/recon/all?start={s}&end={e}&cstart={cs}&cend={ce}&store={store}")
+        if cfg["features"]["journeys"]:
+            urls.append(f"{base}/api/recon/meta/journeys?store={store}")
+        if not cfg["features"]["config_brands"]:
+            urls.append(f"{base}/api/recon/meta/manufacturers?store={store}")
+        if cfg["features"]["categories"]:
+            urls.append(f"{base}/api/recon/all/categories")
+    for u in urls:
+        try:
+            await asyncio.to_thread(_rq.get, u, headers=hdr, timeout=180)
+        except Exception as exc:
+            logger.warning("cache warm request failed: %s (%s)", u, exc)
+    logger.info("cache warm cycle done (%d views)", len(urls))
+
+
+async def _cache_warm_loop():
+    await asyncio.sleep(15)  # let the server finish starting
+    while True:
+        try:
+            await _warm_default_views()
+        except Exception as exc:
+            logger.warning("cache warm cycle failed: %s", exc)
+        nxt = _next_refresh_dt() + timedelta(minutes=2)
+        wait = max(60.0, (nxt - datetime.now(BERLIN_TZ)).total_seconds())
+        await asyncio.sleep(wait)
+
+
+@app.on_event("startup")
+async def _start_cache_warmer():
+    asyncio.create_task(_cache_warm_loop())
