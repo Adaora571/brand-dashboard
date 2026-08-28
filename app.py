@@ -2538,6 +2538,33 @@ async def debug_schema(request: Request, search: str = ""):
     return {"dataset": PROJECT_DATASET, "columns": cols}
 
 
+@app.get("/api/debug/feecheck")
+async def debug_feecheck(request: Request):
+    """TEMP diagnostic: is the Nordleaf prescription fee inside the item price
+    columns, or only in the separate prescription_fees struct?"""
+    if not _recon_authed(request):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    sql = f"""
+    SELECT
+      COUNT(DISTINCT o.order_id) AS orders,
+      ROUND(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), 2) AS item_gross_eur,
+      ROUND(SUM(oi.prescription_fees.allocated_value_after_cancellations_before_discounts_eur), 2) AS rx_fee_allocated_eur,
+      ROUND(SAFE_DIVIDE(SUM(oi.prescription_fees.allocated_value_after_cancellations_before_discounts_eur),
+                        COUNT(DISTINCT o.order_id)), 2) AS fee_per_order_eur,
+      COUNT(DISTINCT CASE WHEN oi.prescription_fees.allocated_value_after_cancellations_before_discounts_eur > 0
+                          THEN o.order_id END) AS orders_with_fee,
+      -- if item totals were qty × unit price exactly, the fee is NOT folded into them
+      COUNTIF(ABS(oi.total_price_before_cancellations_and_discounts_including_vat_eur
+                  - oi.quantity_before_cancellations * oi.unit_price_before_discounts_including_vat_eur) > 0.01) AS price_mismatch_items,
+      COUNT(*) AS total_items
+    FROM `{PROJECT_DATASET}.order_items` oi
+    JOIN `{PROJECT_DATASET}.orders` o ON oi.order_id = o.order_id
+    WHERE DATE(o.created_at) BETWEEN '2026-08-01' AND '2026-08-27'
+    """
+    rows = await run_query_async(sql, [])
+    return {"window": "2026-08-01..2026-08-27", "result": rows[0] if rows else {}}
+
+
 @app.get("/api/data-freshness")
 async def data_freshness():
     """Check the latest order date in BigQuery — useful for diagnosing pipeline lag."""
