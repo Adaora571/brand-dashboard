@@ -857,8 +857,10 @@ def canon_products_cte(store: str = "nordleaf") -> str:
 # the source data; the filter matches order items whose product belongs
 # to ANY selected collection (membership via the `collects` table).
 JOURNEYS_TOKEN = "__journeys__"
-JOURNEY_EXCLUDE_TITLES = {"apo.com products", "apocom", "AFA Pharmacy",
-                          "PayPal Excluded", "Sets"}
+# Per Adaora (2026-08-28): only these three stay hidden from the Journeys
+# menu. Do NOT add new collections here — new Shopify collections should
+# always appear in the menu automatically.
+JOURNEY_EXCLUDE_TITLES = {"apo.com products", "PayPal Excluded", "Sets"}
 
 
 def _smart_collection_specs(store: str) -> dict:
