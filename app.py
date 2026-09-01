@@ -2574,26 +2574,35 @@ async def debug_feecheck(request: Request):
 
 
 @app.get("/api/debug/collectcheck")
-async def debug_collectcheck(request: Request, store: str = "prio-one", collection_id: int = 697196511574):
-    """TEMP diagnostic: per-generation stats for the collects stream — does the
-    latest Airbyte generation hold a complete current snapshot?"""
+async def debug_collectcheck(request: Request, store: str = "prio-one"):
+    """TEMP diagnostic: per-collection, compare Shopify's own products_count
+    (current truth) against the membership rows in `collects`. A positive
+    diff means removals were never synced (collects is append-only)."""
     if not _recon_authed(request):
         raise HTTPException(status_code=403, detail="Not authenticated")
     src_ds = store_cfg(store if store in STORES else "prio-one")["source_shopify"]
     sql = f"""
-    SELECT
-      _airbyte_generation_id AS gen,
-      COUNT(*) AS row_count,
-      COUNT(DISTINCT id) AS distinct_ids,
-      COUNT(DISTINCT IF(collection_id = @cid, product_id, NULL)) AS cid_members,
-      CAST(MIN(_airbyte_extracted_at) AS STRING) AS first_sync,
-      CAST(MAX(_airbyte_extracted_at) AS STRING) AS last_sync
-    FROM `{src_ds}.collects`
-    GROUP BY 1
-    ORDER BY 1
+    WITH c AS (
+      SELECT CAST(id AS STRING) AS id, title, products_count
+      FROM `{src_ds}.collections`
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
+    ),
+    m AS (
+      SELECT CAST(collection_id AS STRING) AS id, COUNT(DISTINCT product_id) AS bq_members
+      FROM `{src_ds}.collects`
+      GROUP BY 1
+    )
+    SELECT c.title, c.products_count AS shopify_count,
+           COALESCE(m.bq_members, 0) AS bq_members,
+           COALESCE(m.bq_members, 0) - COALESCE(c.products_count, 0) AS diff
+    FROM c LEFT JOIN m USING (id)
+    WHERE COALESCE(m.bq_members, 0) > 0
+    ORDER BY diff DESC
     """
-    rows = await run_query_async(sql, [bigquery.ScalarQueryParameter("cid", "INT64", collection_id)])
-    return {"store": store, "collection_id": collection_id, "generations": rows}
+    rows = await run_query_async(sql, [])
+    bad = [r for r in rows if (r.get("diff") or 0) != 0]
+    return {"store": store, "collections_with_members": len(rows),
+            "mismatched": len(bad), "rows": rows}
 
 
 @app.get("/api/data-freshness")
