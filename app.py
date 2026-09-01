@@ -2575,26 +2575,25 @@ async def debug_feecheck(request: Request):
 
 @app.get("/api/debug/collectcheck")
 async def debug_collectcheck(request: Request, store: str = "prio-one", collection_id: int = 697196511574):
-    """TEMP diagnostic: is `collects` a full-refresh snapshot per Airbyte sync
-    (latest batch = current membership) or an append-only log?"""
+    """TEMP diagnostic: per-generation stats for the collects stream — does the
+    latest Airbyte generation hold a complete current snapshot?"""
     if not _recon_authed(request):
         raise HTTPException(status_code=403, detail="Not authenticated")
     src_ds = store_cfg(store if store in STORES else "prio-one")["source_shopify"]
     sql = f"""
-    WITH t AS (SELECT * FROM `{src_ds}.collects`),
-    m AS (SELECT MAX(_airbyte_extracted_at) AS max_ext FROM t)
     SELECT
-      (SELECT COUNT(*) FROM t) AS total_rows,
-      (SELECT COUNT(DISTINCT id) FROM t) AS distinct_collect_ids,
-      (SELECT COUNT(*) FROM t, m WHERE t._airbyte_extracted_at = m.max_ext) AS latest_batch_rows,
-      (SELECT COUNT(DISTINCT _airbyte_extracted_at) FROM t) AS n_batches,
-      (SELECT CAST(MAX(_airbyte_extracted_at) AS STRING) FROM t) AS last_sync,
-      (SELECT COUNT(DISTINCT product_id) FROM t WHERE collection_id = @cid) AS ever_members,
-      (SELECT COUNT(DISTINCT product_id) FROM t, m
-         WHERE t._airbyte_extracted_at = m.max_ext AND collection_id = @cid) AS latest_batch_members
+      _airbyte_generation_id AS gen,
+      COUNT(*) AS row_count,
+      COUNT(DISTINCT id) AS distinct_ids,
+      COUNT(DISTINCT IF(collection_id = @cid, product_id, NULL)) AS cid_members,
+      CAST(MIN(_airbyte_extracted_at) AS STRING) AS first_sync,
+      CAST(MAX(_airbyte_extracted_at) AS STRING) AS last_sync
+    FROM `{src_ds}.collects`
+    GROUP BY 1
+    ORDER BY 1
     """
     rows = await run_query_async(sql, [bigquery.ScalarQueryParameter("cid", "INT64", collection_id)])
-    return {"store": store, "collection_id": collection_id, "result": rows[0] if rows else {}}
+    return {"store": store, "collection_id": collection_id, "generations": rows}
 
 
 @app.get("/api/data-freshness")
