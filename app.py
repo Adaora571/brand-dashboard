@@ -2524,11 +2524,17 @@ async def health():
 
 
 @app.get("/api/debug/schema")
-async def debug_schema(request: Request, search: str = ""):
-    """TEMP: Explore dataset schema. Lists tables + columns matching `search`. Requires recon auth."""
+async def debug_schema(request: Request, search: str = "", dataset: str = ""):
+    """TEMP: Explore dataset schema. Lists tables + columns matching `search`.
+    Optional `dataset` may name any dataset from the STORES config. Requires recon auth."""
     if not request.session.get("recon_auth"):
         raise HTTPException(status_code=403, detail="Not authenticated")
-    project, dataset = PROJECT_DATASET.split(".", 1)
+    allowed = {PROJECT_DATASET}
+    for _c in STORES.values():
+        allowed.add(_c["dataset"])
+        allowed.add(_c["source_shopify"])
+    target = dataset if dataset in allowed else PROJECT_DATASET
+    project, dataset = target.split(".", 1)
     cols_sql = f"""
     SELECT table_name, column_name, data_type
     FROM `{project}.{dataset}.INFORMATION_SCHEMA.COLUMNS`
@@ -2537,7 +2543,7 @@ async def debug_schema(request: Request, search: str = ""):
     """
     params = [bigquery.ScalarQueryParameter("search", "STRING", f"%{search}%")] if search else []
     cols = await run_query_async(cols_sql, params)
-    return {"dataset": PROJECT_DATASET, "columns": cols}
+    return {"dataset": target, "columns": cols}
 
 
 @app.get("/api/debug/feecheck")

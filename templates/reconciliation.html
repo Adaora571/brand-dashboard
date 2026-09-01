@@ -292,6 +292,21 @@
   }
   .compare-custom-dates input[type=date]:focus { border-color:var(--accent); box-shadow:0 0 0 2px rgba(5,137,211,0.1); }
 
+  /* Manufacturer table: scroll inside the card, header + Total row stay visible */
+  .mfr-scroll { max-height: 480px; overflow-y: auto; }
+  #mfrTableEl thead th { position: sticky; top: 0; z-index: 2; }
+  #mfrTableEl tfoot td { position: sticky; bottom: 0; z-index: 2; background: #fff;
+                         border-top: 2px solid var(--border); }
+
+  /* Floating jump-to-Patient-Insights button */
+  .jump-btn {
+    position: fixed; bottom: 22px; right: 22px; z-index: 50;
+    background: var(--navy); color: #fff; border: none; border-radius: 999px;
+    padding: 10px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25); opacity: 0.92;
+  }
+  .jump-btn:hover { opacity: 1; }
+
   /* Row highlighting: click a row in the manufacturer or product table to mark it */
   tr[data-hlkey] { cursor:pointer; }
   tr[data-hlkey]:hover td { background:#f8fafc; }
@@ -530,7 +545,7 @@
 <!-- MANUFACTURER SUMMARY (All Brands only) -->
 <div id="mfrSection" style="display:none;">
 <div class="section-title"><span class="num">★</span> Manufacturer Summary</div>
-<div class="card" style="overflow-x:auto;">
+<div class="card mfr-scroll" style="overflow-x:auto;">
   <table class="fee-table" id="mfrTableEl">
     <thead>
       <tr>
@@ -547,6 +562,8 @@
   </table>
 </div>
 </div>
+
+<button class="jump-btn" onclick="document.getElementById('patientSection').scrollIntoView({behavior:'smooth'})" title="Jump to Patient Insights">↓ Patient Insights</button>
 
 <!-- SECTION 3: PRODUCT PERFORMANCE -->
 <div class="section-title"><span class="num">3</span> Product Performance <span class="filter-tag" id="filterTag"></span></div>
@@ -624,7 +641,7 @@
 </div>
 
 <!-- SECTION 6: PATIENT INSIGHTS -->
-<div class="section-title"><span class="num">6</span> Patient Insights</div>
+<div class="section-title" id="patientSection"><span class="num">6</span> Patient Insights</div>
 <div class="grid grid-3">
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box" style="height:200px;"><canvas id="chartPatients"></canvas></div>
     <div id="patNRSummary" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
