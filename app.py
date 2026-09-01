@@ -2573,6 +2573,30 @@ async def debug_feecheck(request: Request):
     return {"window": "2026-08-01..2026-08-27", "result": rows[0] if rows else {}}
 
 
+@app.get("/api/debug/collectcheck")
+async def debug_collectcheck(request: Request, store: str = "prio-one", collection_id: int = 697196511574):
+    """TEMP diagnostic: is `collects` a full-refresh snapshot per Airbyte sync
+    (latest batch = current membership) or an append-only log?"""
+    if not _recon_authed(request):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    src_ds = store_cfg(store if store in STORES else "prio-one")["source_shopify"]
+    sql = f"""
+    WITH t AS (SELECT * FROM `{src_ds}.collects`),
+    m AS (SELECT MAX(_airbyte_extracted_at) AS max_ext FROM t)
+    SELECT
+      (SELECT COUNT(*) FROM t) AS total_rows,
+      (SELECT COUNT(DISTINCT id) FROM t) AS distinct_collect_ids,
+      (SELECT COUNT(*) FROM t, m WHERE t._airbyte_extracted_at = m.max_ext) AS latest_batch_rows,
+      (SELECT COUNT(DISTINCT _airbyte_extracted_at) FROM t) AS n_batches,
+      (SELECT CAST(MAX(_airbyte_extracted_at) AS STRING) FROM t) AS last_sync,
+      (SELECT COUNT(DISTINCT product_id) FROM t WHERE collection_id = @cid) AS ever_members,
+      (SELECT COUNT(DISTINCT product_id) FROM t, m
+         WHERE t._airbyte_extracted_at = m.max_ext AND collection_id = @cid) AS latest_batch_members
+    """
+    rows = await run_query_async(sql, [bigquery.ScalarQueryParameter("cid", "INT64", collection_id)])
+    return {"store": store, "collection_id": collection_id, "result": rows[0] if rows else {}}
+
+
 @app.get("/api/data-freshness")
 async def data_freshness():
     """Check the latest order date in BigQuery — useful for diagnosing pipeline lag."""
