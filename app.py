@@ -2605,6 +2605,44 @@ async def debug_collectcheck(request: Request, store: str = "prio-one"):
             "mismatched": len(bad), "rows": rows}
 
 
+@app.get("/api/debug/revmap")
+async def debug_revmap(request: Request, store: str = "nordleaf",
+                       start: str = "2026-09-01", end: str = "2026-09-04", tz: str = "utc"):
+    """TEMP diagnostic: sum every candidate revenue column so dashboard figures
+    can be mapped onto Shopify's Gross sales / Net sales / Total sales.
+    tz=utc uses DATE(created_at) (what the dashboard does today);
+    tz=berlin uses DATE(created_at, 'Europe/Berlin') (what Shopify reports)."""
+    if not _recon_authed(request):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    _cfg = store_cfg(store if store in STORES else "nordleaf")
+    _DS = _cfg["dataset"]
+    dexpr = "DATE(o.created_at, 'Europe/Berlin')" if tz == "berlin" else "DATE(o.created_at)"
+    shop = _cfg["shop_where"] or ""
+    sql = f"""
+    SELECT
+      COUNT(DISTINCT o.order_id) AS orders,
+      ROUND(SUM(oi.total_price_before_cancellations_and_discounts_including_vat_eur),2) AS pre_cancel_pre_disc_incl_vat,
+      ROUND(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),2) AS dash_gross_revenue,
+      ROUND(SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur),2) AS after_cancel_after_disc_incl_vat,
+      ROUND(SUM(oi.vat_amount_after_cancellations_eur),2) AS vat,
+      ROUND(SUM(oi.refund_amount_including_vat_eur),2) AS refunds,
+      ROUND(SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
+            - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
+            - COALESCE(SUM(oi.refund_amount_including_vat_eur),0),2) AS dash_net_revenue,
+      ROUND(SUM(oi.prescription_fees.allocated_value_after_cancellations_before_discounts_eur),2) AS rx_fees,
+      ROUND(SUM(oi.quantity_after_cancellations),2) AS units,
+      CAST(MAX(o.created_at) AS STRING) AS last_order_ts_utc
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
+    WHERE {dexpr} BETWEEN @s AND @e {shop} {NET_ORDER_FILTER}
+    """
+    rows = await run_query_async(sql, [
+        bigquery.ScalarQueryParameter("s", "DATE", start),
+        bigquery.ScalarQueryParameter("e", "DATE", end),
+    ])
+    return {"store": store, "window": f"{start}..{end}", "tz": tz, "result": rows[0] if rows else {}}
+
+
 @app.get("/api/data-freshness")
 async def data_freshness():
     """Check the latest order date in BigQuery — useful for diagnosing pipeline lag."""
