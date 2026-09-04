@@ -234,9 +234,21 @@ else:
 
 PROJECT_DATASET = os.getenv("BQ_DATASET", "htv-data-foundation-prod.datamarts")
 
-# Net-orders filter (Klar-style): exclude voided/refunded/cancelled orders.
-# Partially-refunded orders are kept (matching Klar's definition).
-NET_ORDER_FILTER = "AND o.payment_status NOT IN ('voided', 'refunded') AND o.is_cancelled = FALSE"
+# Order-scope filter applied at every live query site.
+#
+# Until 2026-09-04 this excluded voided/refunded/cancelled orders
+# ("Klar-style net orders"). That deleted an order from EVERY historical
+# figure the moment it was refunded, so past periods kept shrinking for weeks
+# (Aug 1-4 2026 lost 5.9% of its orders, older months 7-9%) while their revenue
+# stayed put (cancelled lines are already zero in the *_after_cancellations_*
+# columns) - which inflated AOV on old windows and faked MoM deltas.
+#
+# Now: keep the sale in the period it was placed (Shopify's convention) and let
+# the *_after_cancellations_* columns carry the reversal. Order/patient counts
+# match Shopify's "Orders" exactly; revenue and volume are unchanged.
+NET_ORDER_FILTER = ""
+# The old exclusion, kept only for the /api/debug/* endpoints' voided= toggle.
+LEGACY_NET_ORDER_FILTER = "AND o.payment_status NOT IN ('voided', 'refunded') AND o.is_cancelled = FALSE"
 
 # ============================================================
 # ★ MANUFACTURER AUTH
@@ -1089,9 +1101,22 @@ def _comp_window(start: str, end: str, comp_start: str, comp_end: str,
     # does. An OFFSET comparison (MoM / WoW / YoY: the window sits a whole
     # month/week/year back and BEGINS at the equivalent point) must instead
     # trim the END, so "Sep 1-4 to 09:10" is read against "Aug 1-4 to 09:10".
+    # Exception: a window of exactly 1 day or a whole number of weeks whose
+    # "previous period" is the day / week(s) right before it is ALSO an offset
+    # comparison (today vs yesterday, this week vs last week). Weekday and
+    # time-of-day alignment matter more there than the period boundary, so
+    # treat those as offset (start-anchored). Verified 2026-09-04: the old rule
+    # compared "Sep 4 00:00-13:11" with "Sep 3 10:48-23:59" (-55% orders).
     try:
-        contiguous = (datetime.strptime(comp_end, "%Y-%m-%d").date()
-                      == datetime.strptime(start, "%Y-%m-%d").date() - timedelta(days=1))
+        _s = datetime.strptime(start, "%Y-%m-%d").date()
+        _e = datetime.strptime(end, "%Y-%m-%d").date()
+        _cs = datetime.strptime(comp_start, "%Y-%m-%d").date()
+        _ce = datetime.strptime(comp_end, "%Y-%m-%d").date()
+        cur_days = (_e - _s).days + 1
+        same_len = (_ce - _cs).days + 1 == cur_days
+        contiguous = _ce == _s - timedelta(days=1)
+        if contiguous and same_len and (cur_days == 1 or cur_days % 7 == 0):
+            contiguous = False
     except Exception:
         contiguous = False
 
@@ -1312,7 +1337,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         COUNT(DISTINCT o.order_id) AS prescriptions,
         SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
         SUM(oi.quantity_after_cancellations) AS sales_volume_g,
-        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
+        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur,
         SAFE_DIVIDE(SUM(oi.cancelled_quantity), SUM(oi.quantity_before_cancellations)) AS cancellation_rate,
         SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_prescription,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
@@ -1320,7 +1345,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         COUNT(DISTINCT o.customer_id) AS total_patients,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
         SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
-        SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0) - COALESCE(oi.refund_amount_including_vat_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
+        SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
       FROM `{_DS}.order_items` oi
       JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1352,7 +1377,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         COUNT(DISTINCT o.order_id) AS prescriptions,
         SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
         SUM(oi.quantity_after_cancellations) AS sales_volume_g,
-        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
+        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur,
         COUNT(DISTINCT o.customer_id) AS total_patients,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
@@ -1491,12 +1516,12 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
       COUNT(DISTINCT o.order_id) AS prescriptions,
       SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
       SUM(oi.quantity_after_cancellations) AS sales_volume_g,
-      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur,
       SAFE_DIVIDE(SUM(oi.cancelled_quantity), SUM(oi.quantity_before_cancellations)) AS cancellation_rate,
       SUM(oi.refund_amount_including_vat_eur) AS refund_eur,
       SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate,
       SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
-      SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0) - COALESCE(oi.refund_amount_including_vat_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
+      SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1594,7 +1619,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
       COUNT(DISTINCT o.order_id) AS prescriptions,
       SUM(oi.quantity_after_cancellations) AS volume_g,
       SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
-      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur,
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur,
       SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
       SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_rx
     FROM `{_DS}.order_items` oi
@@ -1675,7 +1700,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
 
     cat_sql = f"""
     SELECT ({CATEGORY_EXPR}) AS category,
-      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1683,7 +1708,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     """
     ori_sql = f"""
     SELECT oi.product_country_or_origin AS origin,
-      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1698,7 +1723,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
         WHEN SAFE_DIVIDE(oi.total_price_after_cancellations_before_discounts_including_vat_eur, NULLIF(oi.quantity_after_cancellations,0)) < 14 THEN '€10–14/g'
         ELSE '> €14/g'
       END AS price_tier,
-      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1717,7 +1742,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     brand_sql = f"""
     SELECT COALESCE(oi.product_brand_name, 'Unknown') AS brand,
       COUNT(DISTINCT oi.order_id) AS prescriptions,
-      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1726,7 +1751,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     mfr_sql = f"""
     SELECT COALESCE({_mfg_x}, 'Unknown') AS manufacturer,
       SUM(oi.quantity_after_cancellations) AS volume_units,
-      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0) - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+      (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1805,7 +1830,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       COUNT(DISTINCT o.order_id) AS order_count,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
        - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
-       - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+      ) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     JOIN first_order f ON o.customer_id = f.customer_id
@@ -1821,7 +1846,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
       COUNT(DISTINCT o.order_id) AS order_count,
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
        - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
-       - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+      ) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     JOIN first_order f ON o.customer_id = f.customer_id
@@ -2434,7 +2459,7 @@ async def api_recon_combined(
                   SUM(oi.quantity_after_cancellations) AS volume_units,
                   (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
                    - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
-                   - COALESCE(SUM(oi.refund_amount_including_vat_eur),0)) AS net_revenue_eur
+                  ) AS net_revenue_eur
                 FROM `{_DS}.order_items` oi
                 JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
                 WHERE ({" OR ".join(extra_or)})
@@ -2717,7 +2742,7 @@ async def debug_revmap(request: Request, store: str = "nordleaf",
     _cfg = store_cfg(store if store in STORES else "nordleaf")
     _DS = _cfg["dataset"]
     dexpr = "DATE(o.created_at, 'Europe/Berlin')" if tz == "berlin" else "DATE(o.created_at)"
-    nof = "" if voided else NET_ORDER_FILTER
+    nof = "" if voided else LEGACY_NET_ORDER_FILTER
     # ex-VAT per row using the row's own vat_rate (mixed 19%/7% baskets)
     def ex(col):
         return f"SUM(SAFE_DIVIDE(oi.{col}, 1 + COALESCE(oi.vat_rate, 0)))"
@@ -2769,7 +2794,7 @@ async def debug_ordermap(request: Request, store: str = "nordleaf",
         raise HTTPException(status_code=403, detail="Not authenticated")
     _cfg = store_cfg(store if store in STORES else "nordleaf")
     _DS = _cfg["dataset"]
-    nof = "" if voided else NET_ORDER_FILTER
+    nof = "" if voided else LEGACY_NET_ORDER_FILTER
     sql = f"""
     WITH o AS (
       SELECT
