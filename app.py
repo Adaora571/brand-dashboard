@@ -2682,40 +2682,57 @@ async def debug_collectcheck(request: Request, store: str = "prio-one"):
 
 @app.get("/api/debug/revmap")
 async def debug_revmap(request: Request, store: str = "nordleaf",
-                       start: str = "2026-09-01", end: str = "2026-09-04", tz: str = "utc"):
-    """TEMP diagnostic: sum every candidate revenue column so dashboard figures
-    can be mapped onto Shopify's Gross sales / Net sales / Total sales.
-    tz=utc uses DATE(created_at) (what the dashboard does today);
-    tz=berlin uses DATE(created_at, 'Europe/Berlin') (what Shopify reports)."""
+                       start: str = "2026-09-01", end: str = "2026-09-04",
+                       tz: str = "berlin", voided: str = ""):
+    """TEMP diagnostic: sum every revenue/discount/refund column so the
+    dashboard can be reconciled against Shopify's sales breakdown
+    (Gross sales / Discounts / Sales reversals / Net sales / Taxes / Total sales).
+    voided=1 drops NET_ORDER_FILTER so cancelled/voided orders are included
+    (Shopify counts those in Gross sales and removes them as reversals)."""
     if not _recon_authed(request):
         raise HTTPException(status_code=403, detail="Not authenticated")
     _cfg = store_cfg(store if store in STORES else "nordleaf")
     _DS = _cfg["dataset"]
     dexpr = "DATE(o.created_at, 'Europe/Berlin')" if tz == "berlin" else "DATE(o.created_at)"
-    shop = _cfg["shop_where"] or ""
+    nof = "" if voided else NET_ORDER_FILTER
+    # ex-VAT per row using the row's own vat_rate (mixed 19%/7% baskets)
+    def ex(col):
+        return f"SUM(SAFE_DIVIDE(oi.{col}, 1 + COALESCE(oi.vat_rate, 0)))"
     sql = f"""
     SELECT
       COUNT(DISTINCT o.order_id) AS orders,
-      ROUND(SUM(oi.total_price_before_cancellations_and_discounts_including_vat_eur),2) AS pre_cancel_pre_disc_incl_vat,
-      ROUND(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),2) AS dash_gross_revenue,
-      ROUND(SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur),2) AS after_cancel_after_disc_incl_vat,
-      ROUND(SUM(oi.vat_amount_after_cancellations_eur),2) AS vat,
-      ROUND(SUM(oi.refund_amount_including_vat_eur),2) AS refunds,
-      ROUND(SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
-            - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
-            - COALESCE(SUM(oi.refund_amount_including_vat_eur),0),2) AS dash_net_revenue,
-      ROUND(SUM(oi.prescription_fees.allocated_value_after_cancellations_before_discounts_eur),2) AS rx_fees,
-      ROUND(SUM(oi.quantity_after_cancellations),2) AS units,
+      COUNT(*) AS items,
+      -- incl VAT
+      ROUND(SUM(oi.total_price_before_cancellations_and_discounts_including_vat_eur),2) AS A_pre_cancel_pre_disc,
+      ROUND(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),2) AS B_post_cancel_pre_disc,
+      ROUND(SUM(oi.total_discounts_value_after_cancellations_including_vat_eur),2) AS D_discounts,
+      ROUND(SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur),2) AS C_post_cancel_post_disc,
+      ROUND(SUM(oi.refund_amount_including_vat_eur),2) AS R_refunds,
+      -- VAT
+      ROUND(SUM(oi.vat_amount_before_cancellations_eur),2) AS vat_pre_cancel,
+      ROUND(SUM(oi.vat_amount_after_cancellations_eur),2) AS vat_post_cancel,
+      ROUND(SUM(oi.refund_vat_eur),2) AS vat_refund,
+      -- ex VAT (derived per row from vat_rate)
+      ROUND({ex('total_price_before_cancellations_and_discounts_including_vat_eur')},2) AS A_ex_vat,
+      ROUND({ex('total_price_after_cancellations_before_discounts_including_vat_eur')},2) AS B_ex_vat,
+      ROUND({ex('total_discounts_value_after_cancellations_including_vat_eur')},2) AS D_ex_vat,
+      ROUND({ex('total_price_after_cancellations_and_discounts_including_vat_eur')},2) AS C_ex_vat,
+      ROUND({ex('refund_amount_including_vat_eur')},2) AS R_ex_vat,
+      -- quantities
+      SUM(oi.quantity_before_cancellations) AS qty_pre_cancel,
+      SUM(oi.quantity_after_cancellations) AS qty_post_cancel,
+      SUM(oi.cancelled_quantity) AS qty_cancelled,
       CAST(MAX(o.created_at) AS STRING) AS last_order_ts_utc
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
-    WHERE {dexpr} BETWEEN @s AND @e {shop} {NET_ORDER_FILTER}
+    WHERE {dexpr} BETWEEN @s AND @e {_cfg['shop_where']} {nof}
     """
     rows = await run_query_async(sql, [
         bigquery.ScalarQueryParameter("s", "DATE", start),
         bigquery.ScalarQueryParameter("e", "DATE", end),
     ])
-    return {"store": store, "window": f"{start}..{end}", "tz": tz, "result": rows[0] if rows else {}}
+    return {"store": store, "window": f"{start}..{end}", "tz": tz,
+            "voided_included": bool(voided), "result": rows[0] if rows else {}}
 
 
 @app.get("/api/data-freshness")
