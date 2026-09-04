@@ -2544,8 +2544,11 @@ function formatChange(curr, prev) {
   const cmpMode = document.querySelector('.compare-opt.active')?.dataset.cmp || 'prev';
   let label = cmpOn ? (cmpLabels[cmpMode] || 'vs prev') : 'vs prev period';
   // Comparison is capped to the same elapsed span as the (partial) current
-  // period, matching Shopify — say so, so the delta isn't misread.
-  if (compTruncated) label += ' (to date)';
+  // period, matching Shopify — say so, but keep it short enough for one line.
+  if (compTruncated) {
+    const shortLabels = { prev:'vs prev', mom:'vs prev mo.', wow:'vs prev wk', dod:'vs prev day', yoy:'vs prev yr' };
+    label = (cmpOn ? (shortLabels[cmpMode] || 'vs prev') : 'vs prev') + ' (to date)';
+  }
   return `<span class="${cls}">${sym}${Math.abs(pct)}% ${label}</span>`;
 }
 
