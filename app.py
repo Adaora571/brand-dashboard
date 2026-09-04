@@ -2735,6 +2735,53 @@ async def debug_revmap(request: Request, store: str = "nordleaf",
             "voided_included": bool(voided), "result": rows[0] if rows else {}}
 
 
+@app.get("/api/debug/ordermap")
+async def debug_ordermap(request: Request, store: str = "nordleaf",
+                         start: str = "2026-09-01", end: str = "2026-09-04",
+                         voided: str = ""):
+    """TEMP diagnostic: ORDER-level money columns (discounts live here, not on
+    order_items — per the data team 2026-09-04). Aggregated over distinct
+    orders so nothing is multiplied by the line-item count."""
+    if not _recon_authed(request):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    _cfg = store_cfg(store if store in STORES else "nordleaf")
+    _DS = _cfg["dataset"]
+    nof = "" if voided else NET_ORDER_FILTER
+    sql = f"""
+    WITH o AS (
+      SELECT
+        o.order_id,
+        ANY_VALUE(o.total_order_value_before_discounts_including_vat_eur) AS before_disc,
+        ANY_VALUE(o.total_discounts_value_including_vat_eur)              AS disc,
+        ANY_VALUE(o.total_order_value_after_discounts_including_vat_eur)  AS after_disc,
+        ANY_VALUE(o.total_vat_amount_eur)                                 AS vat,
+        ANY_VALUE(o.total_refund_amount_including_vat_eur)                AS refund,
+        ANY_VALUE(o.shipping_price_including_vat_eur)                     AS shipping,
+        ANY_VALUE(o.total_adjustment_amount_including_vat_eur)            AS adjustment
+      FROM `{_DS}.orders` o
+      WHERE DATE(o.created_at, 'Europe/Berlin') BETWEEN @s AND @e {_cfg['shop_where']} {nof}
+      GROUP BY o.order_id
+    )
+    SELECT
+      COUNT(*) AS orders,
+      ROUND(SUM(before_disc),2) AS order_value_before_discounts_incl_vat,
+      ROUND(SUM(disc),2)        AS discounts_incl_vat,
+      ROUND(SUM(after_disc),2)  AS order_value_after_discounts_incl_vat,
+      ROUND(SUM(vat),2)         AS vat,
+      ROUND(SUM(refund),2)      AS refunds_incl_vat,
+      ROUND(SUM(shipping),2)    AS shipping,
+      ROUND(SUM(adjustment),2)  AS adjustments,
+      ROUND(SUM(after_disc) - COALESCE(SUM(vat),0),2) AS ex_vat_after_discounts
+    FROM o
+    """
+    rows = await run_query_async(sql, [
+        bigquery.ScalarQueryParameter("s", "DATE", start),
+        bigquery.ScalarQueryParameter("e", "DATE", end),
+    ])
+    return {"store": store, "window": f"{start}..{end}",
+            "voided_included": bool(voided), "result": rows[0] if rows else {}}
+
+
 @app.get("/api/data-freshness")
 async def data_freshness():
     """Check the latest order date in BigQuery — useful for diagnosing pipeline lag."""
