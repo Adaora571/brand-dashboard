@@ -7,7 +7,7 @@ Queries BigQuery live data and serves per-manufacturer dashboards.
 """
 
 import os, json, hashlib, hmac, logging, asyncio, time, secrets, re, ast
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Request, HTTPException, Query, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -355,7 +355,7 @@ def mfg_clause(mfg_name):
                 pname = f"@pr_{i}_name"
                 params.append(bigquery.ScalarQueryParameter(f"pr_{i}_name", "STRING", pr["product_like"]))
                 if pr.get("from_date"):
-                    or_parts.append(f"(oi.product_name LIKE {pname} AND DATE(o.created_at) >= @pr_{i}_from)")
+                    or_parts.append(f"(oi.product_name LIKE {pname} AND DATE(o.created_at, 'Europe/Berlin') >= @pr_{i}_from)")
                     params.append(bigquery.ScalarQueryParameter(f"pr_{i}_from", "DATE", pr["from_date"]))
                 else:
                     or_parts.append(f"oi.product_name LIKE {pname}")
@@ -442,7 +442,7 @@ def resolve_multi_brand_mfg(slugs: list[str]):
                 pn = f"@{pfx}pr{j}"
                 params.append(bigquery.ScalarQueryParameter(f"{pfx}pr{j}", "STRING", pr["product_like"]))
                 if pr.get("from_date"):
-                    sub_parts.append(f"(oi.product_name LIKE {pn} AND DATE(o.created_at) >= @{pfx}pr{j}d)")
+                    sub_parts.append(f"(oi.product_name LIKE {pn} AND DATE(o.created_at, 'Europe/Berlin') >= @{pfx}pr{j}d)")
                     params.append(bigquery.ScalarQueryParameter(f"{pfx}pr{j}d", "DATE", pr["from_date"]))
                 else:
                     sub_parts.append(f"oi.product_name LIKE {pn}")
@@ -1041,6 +1041,56 @@ def _slug_has_novacana(slug: str) -> bool:
     return "novacana" in [s.strip() for s in slug.split(",")]
 
 
+def _data_max_ts(store: str):
+    """Latest order timestamp present in a store's data (cached until the next
+    DWH refresh). The warehouse only loads every 2h, so the current day is
+    always partial — this is where it actually stops."""
+    ck = cache_key("data_max_ts", store=store)
+    c = cache_get(ck)
+    if c is not None:
+        return c.get("mx")
+    cfg = store_cfg(store)
+    sql = f"SELECT MAX(o.created_at) AS mx FROM `{cfg['dataset']}.orders` o WHERE TRUE {cfg['shop_where']}"
+    try:
+        rows = run_query(sql, [])
+        mx = rows[0].get("mx") if rows else None
+    except Exception as exc:
+        logger.warning("data_max_ts lookup failed: %s", exc)
+        mx = None
+    cache_set(ck, {"mx": mx})
+    return mx
+
+
+def _comp_window(start: str, end: str, comp_start: str, comp_end: str,
+                 start_time: str, end_time: str, store: str):
+    """Shopify-style like-for-like comparison window.
+
+    The current period is usually cut short by the warehouse cutoff (e.g. "Sep
+    1-4" really ends 09:10 on the 4th). Comparing that against a COMPLETE
+    previous period makes every delta look negative. So when the current window
+    is truncated, shorten the comparison window by the same amount and compare
+    equal elapsed spans — which is what Shopify's own comparisons do.
+
+    Returns (comp_ts_start, comp_ts_end, truncated).
+    """
+    def _ts(d: str, t: str):
+        return datetime.strptime(f"{d} {t}", "%Y-%m-%d %H:%M").replace(tzinfo=BERLIN_TZ)
+
+    st = start_time or "00:00"
+    et = end_time or "23:59"
+    cur_s, cur_e = _ts(start, st), _ts(end, et)
+    cs_ts, ce_ts = _ts(comp_start, st), _ts(comp_end, et)
+    truncated = False
+    mx = _data_max_ts(store)
+    if mx is not None:
+        mx_b = mx.astimezone(BERLIN_TZ) if mx.tzinfo else mx.replace(tzinfo=timezone.utc).astimezone(BERLIN_TZ)
+        if cur_s < mx_b < cur_e:
+            capped = cs_ts + (mx_b - cur_s)
+            if capped < ce_ts:
+                ce_ts, truncated = capped, True
+    return cs_ts, ce_ts, truncated
+
+
 def date_params(start_date: str, end_date: str, category: str = "", product_line: str = "", is_novacana: bool = False,
                 start_time: str = "", end_time: str = ""):
     """Build date + category + product_line filter SQL + params.
@@ -1056,19 +1106,19 @@ def date_params(start_date: str, end_date: str, category: str = "", product_line
         params.append(bigquery.ScalarQueryParameter("start_date", "DATE", start_date))
         if start_time:
             # Loose DATE guard keeps partition pruning; the precise bound is the timestamp.
-            clauses.append("DATE(o.created_at) >= DATE_SUB(@start_date, INTERVAL 1 DAY)")
+            clauses.append("DATE(o.created_at, 'Europe/Berlin') >= DATE_SUB(@start_date, INTERVAL 1 DAY)")
             clauses.append("o.created_at >= TIMESTAMP(DATETIME(@start_date, @start_time), 'Europe/Berlin')")
             params.append(bigquery.ScalarQueryParameter("start_time", "TIME", start_time + ":00"))
         else:
-            clauses.append("DATE(o.created_at) >= @start_date")
+            clauses.append("DATE(o.created_at, 'Europe/Berlin') >= @start_date")
     if end_date:
         params.append(bigquery.ScalarQueryParameter("end_date", "DATE", end_date))
         if end_time:
-            clauses.append("DATE(o.created_at) <= DATE_ADD(@end_date, INTERVAL 1 DAY)")
+            clauses.append("DATE(o.created_at, 'Europe/Berlin') <= DATE_ADD(@end_date, INTERVAL 1 DAY)")
             clauses.append("o.created_at <= TIMESTAMP(DATETIME(@end_date, @end_time), 'Europe/Berlin')")
             params.append(bigquery.ScalarQueryParameter("end_time", "TIME", end_time + ":59"))
         else:
-            clauses.append("DATE(o.created_at) <= @end_date")
+            clauses.append("DATE(o.created_at, 'Europe/Berlin') <= @end_date")
     if category:
         cats, super_value, super_value_excl, journey_ids = _split_category_param(category)
         if len(cats) == 1:
@@ -1198,27 +1248,34 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     ce = compare_end or ""
 
     # Build comparison WHERE clause
+    comp_extra_p = []
     if cs and ce:
-        # Frontend sent explicit comparison dates
-        compare_clause = "DATE(o.created_at) >= DATE(@comp_start) AND DATE(o.created_at) <= DATE(@comp_end)"
-        if start_time and end_time:
-            # Apply the same time-of-day window to the comparison period
-            # (@start_time/@end_time params are supplied via date_params).
-            compare_clause = (
-                "o.created_at >= TIMESTAMP(DATETIME(@comp_start, @start_time), 'Europe/Berlin') "
-                "AND o.created_at <= TIMESTAMP(DATETIME(@comp_end, @end_time), 'Europe/Berlin') "
-                "AND DATE(o.created_at) >= DATE_SUB(DATE(@comp_start), INTERVAL 1 DAY) "
-                "AND DATE(o.created_at) <= DATE_ADD(DATE(@comp_end), INTERVAL 1 DAY)"
-            )
+        # Frontend sent explicit comparison dates. Build the window from exact
+        # timestamps and cap it to the same elapsed span as the current period
+        # (see _comp_window) so the deltas are like-for-like, as in Shopify.
+        _cts, _cte, _trunc = _comp_window(s, e, cs, ce, start_time, end_time, store)
+        compare_clause = (
+            "o.created_at >= @comp_ts_start AND o.created_at <= @comp_ts_end "
+            "AND DATE(o.created_at, 'Europe/Berlin') >= DATE_SUB(DATE(@comp_start), INTERVAL 1 DAY) "
+            "AND DATE(o.created_at, 'Europe/Berlin') <= DATE_ADD(DATE(@comp_end), INTERVAL 1 DAY)"
+        )
+        comp_extra_p = [
+            bigquery.ScalarQueryParameter("comp_ts_start", "TIMESTAMP", _cts),
+            bigquery.ScalarQueryParameter("comp_ts_end", "TIMESTAMP", _cte),
+        ]
+        _comp_info = {"truncated": _trunc,
+                      "start": _cts.strftime("%Y-%m-%d %H:%M"),
+                      "end": _cte.strftime("%Y-%m-%d %H:%M")}
     else:
         # Default: mirror-length window right before the current start
         compare_clause = (
-            "DATE(o.created_at) >= DATE_SUB(DATE(@comp_start), "
+            "DATE(o.created_at, 'Europe/Berlin') >= DATE_SUB(DATE(@comp_start), "
             "INTERVAL DATE_DIFF(DATE(@comp_end), DATE(@comp_start), DAY) DAY) "
-            "AND DATE(o.created_at) < DATE(@comp_start)"
+            "AND DATE(o.created_at, 'Europe/Berlin') < DATE(@comp_start)"
         )
         cs = s
         ce = e
+        _comp_info = {"truncated": False}
 
     mfg_where, mfg_p = mfg_clause(mfg_name)
     _cfg = store_cfg(store); _DS = _cfg["dataset"]
@@ -1317,6 +1374,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     params = mfg_p + [
         bigquery.ScalarQueryParameter("comp_start", "DATE", cs),
         bigquery.ScalarQueryParameter("comp_end", "DATE", ce),
+        *comp_extra_p,
     ] + date_p
 
     rows = run_query(sql, params)
@@ -1366,6 +1424,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "repeat_purchase_rate": safe_growth(r.get("repeat_purchase_rate"), r.get("prev_repeat_rate")),
         },
         "fee": {"amount": fee_amount},
+        "comp": _comp_info,
     }
     cache_set(ck, result)
     return result
@@ -1408,7 +1467,7 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
 
     sql = f"""
     SELECT
-      FORMAT_DATE('%Y-%m', DATE(o.created_at)) AS period,
+      FORMAT_DATE('%Y-%m', DATE(o.created_at, 'Europe/Berlin')) AS period,
       COUNT(DISTINCT o.order_id) AS prescriptions,
       SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
       SUM(oi.quantity_after_cancellations) AS sales_volume_g,
@@ -1710,7 +1769,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
 
     fo_cte = f"""
     WITH first_order AS (
-      SELECT o.customer_id, MIN(DATE(o.created_at)) AS first_date
+      SELECT o.customer_id, MIN(DATE(o.created_at, 'Europe/Berlin')) AS first_date
       FROM `{_DS}.order_items` oi
       JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {NET_ORDER_FILTER}
@@ -1720,7 +1779,7 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
     nr_sql = f"""
     {fo_cte}
     SELECT
-      FORMAT_DATE('%Y-%m', DATE(o.created_at)) AS period,
+      FORMAT_DATE('%Y-%m', DATE(o.created_at, 'Europe/Berlin')) AS period,
       IF(f.first_date >= @start_date AND f.first_date <= @end_date, 'new', 'returning') AS patient_type,
       COUNT(DISTINCT o.customer_id) AS patient_count,
       COUNT(DISTINCT o.order_id) AS order_count,
@@ -1826,7 +1885,7 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
 
     sql = f"""
     SELECT
-      FORMAT_DATE('%Y-%m', DATE(o.created_at)) AS period,
+      FORMAT_DATE('%Y-%m', DATE(o.created_at, 'Europe/Berlin')) AS period,
       SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
@@ -1897,8 +1956,8 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
     if start_time and end_time:
         # Time window set: loose DATE guard (partition pruning) + precise Berlin timestamps
         date_clause = (
-            "DATE(o.created_at) >= DATE_SUB(DATE(@start), INTERVAL 1 DAY) "
-            "AND DATE(o.created_at) <= DATE_ADD(DATE(@end), INTERVAL 1 DAY) "
+            "DATE(o.created_at, 'Europe/Berlin') >= DATE_SUB(DATE(@start), INTERVAL 1 DAY) "
+            "AND DATE(o.created_at, 'Europe/Berlin') <= DATE_ADD(DATE(@end), INTERVAL 1 DAY) "
             "AND o.created_at >= TIMESTAMP(DATETIME(DATE(@start), @stime), 'Europe/Berlin') "
             "AND o.created_at <= TIMESTAMP(DATETIME(DATE(@end), @etime), 'Europe/Berlin')"
         )
@@ -1907,7 +1966,7 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
             bigquery.ScalarQueryParameter("etime", "TIME", end_time + ":59"),
         ]
     else:
-        date_clause = "DATE(o.created_at) >= DATE(@start) AND DATE(o.created_at) <= DATE(@end)"
+        date_clause = "DATE(o.created_at, 'Europe/Berlin') >= DATE(@start) AND DATE(o.created_at, 'Europe/Berlin') <= DATE(@end)"
         time_p = []
     sql = f"""
     SELECT COUNT(DISTINCT o.order_id) AS total_rx
@@ -2180,6 +2239,19 @@ async def api_recon_combined(
         comp_s_dt = comp_e_dt - timedelta(days=span)
         comp_s, comp_e = comp_s_dt.strftime("%Y-%m-%d"), comp_e_dt.strftime("%Y-%m-%d")
 
+    # Match the KPI comparison: cap the patients comparison window to the same
+    # elapsed span as the current period, so New/Returning deltas are
+    # like-for-like too (see _comp_window).
+    p_stime, p_etime = stime, etime
+    try:
+        _pcts, _pcte, _ptrunc = _comp_window(s, e, comp_s, comp_e, stime, etime, store)
+        if _ptrunc:
+            comp_e = _pcte.strftime("%Y-%m-%d")
+            p_stime = stime or "00:00"
+            p_etime = _pcte.strftime("%H:%M")
+    except Exception as exc:
+        logger.warning("patients comparison window calc failed: %s", exc)
+
     # Run all queries in parallel (including platform total for market share)
     pl = product_line
     summary, trends, products, breakdowns, patients, patients_prev, pricing, platform_rx = await asyncio.gather(
@@ -2188,10 +2260,12 @@ async def api_recon_combined(
         _get_products(mfg_name, slug, start, end, category=category, product_line=pl, start_time=stime, end_time=etime, store=store),
         _get_breakdowns(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
         _get_patients(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
-        _get_patients(mfg_name, slug, comp_s, comp_e, category, product_line=pl, start_time=stime, end_time=etime, store=store),
+        _get_patients(mfg_name, slug, comp_s, comp_e, category, product_line=pl, start_time=p_stime, end_time=p_etime, store=store),
         _get_pricing(mfg_name, slug, start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
         _get_platform_total_rx(start, end, category, product_line=pl, start_time=stime, end_time=etime, store=store),
     )
+
+    comp_info = summary.get("comp", {"truncated": False})
 
     # Map summary → kpi / kpi_compare
     cur = summary.get("current", {})
@@ -2327,7 +2401,7 @@ async def api_recon_combined(
                 pn = f"@spr_{i}_name"
                 extra_params.append(bigquery.ScalarQueryParameter(f"spr_{i}_name", "STRING", pr["product_like"]))
                 if pr.get("from_date"):
-                    extra_or.append(f"(oi.product_name LIKE {pn} AND DATE(o.created_at) >= @spr_{i}_from)")
+                    extra_or.append(f"(oi.product_name LIKE {pn} AND DATE(o.created_at, 'Europe/Berlin') >= @spr_{i}_from)")
                     extra_params.append(bigquery.ScalarQueryParameter(f"spr_{i}_from", "DATE", pr["from_date"]))
                 else:
                     extra_or.append(f"oi.product_name LIKE {pn}")
@@ -2422,6 +2496,7 @@ async def api_recon_combined(
         "patient_new_returning": pat_nr,
         "patient_age": pat_age,
         "patient_region": pat_reg,
+        "comp_info": comp_info,
     }
 
 
