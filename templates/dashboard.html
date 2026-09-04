@@ -480,6 +480,10 @@ const API = `/api/brand/${SLUG}`;
 let selectedProductLine = '';
 let cachedProductLines = [];
 
+// True when the backend capped the comparison window to the same elapsed
+// span as the (partial) current period — deltas are then like-for-like.
+let compTruncated = false;
+
 async function apiFetch(endpoint, extraParams = '') {
   const s = document.getElementById('startDate').value;
   const e = document.getElementById('endDate').value;
@@ -566,7 +570,14 @@ function setChg(id, val) {
   const cmpLabels = { prev:'vs prev period', mom:'MoM', wow:'WoW', dod:'DoD', yoy:'YoY' };
   const cmpOn = document.getElementById('compareToggle')?.classList.contains('on');
   const cmpMode = document.querySelector('.compare-opt.active')?.dataset.cmp || 'prev';
-  const label = cmpOn ? (cmpLabels[cmpMode] || 'vs prev') : 'vs prev period';
+  let label = cmpOn ? (cmpLabels[cmpMode] || 'vs prev') : 'vs prev period';
+  // The comparison period is capped to the same elapsed span as the current
+  // one whenever today's data is still partial — mark it so the delta isn't
+  // read as a full previous period.
+  if (compTruncated) {
+    const shortLabels = { prev:'vs prev', mom:'MoM', wow:'WoW', dod:'DoD', yoy:'YoY' };
+    label = (cmpOn ? (shortLabels[cmpMode] || 'vs prev') : 'vs prev') + ' (to date)';
+  }
   el.textContent = (val >= 0 ? '▲ ' : '▼ ') + Math.abs(p) + '% ' + label;
   el.className = 'change ' + (val >= 0 ? 'up' : 'down');
 }
@@ -918,6 +929,7 @@ function populateSelect(id, options, allLabel) {
 // ============================================================
 function renderSummary(data) {
   const c = data.current||{}, g = data.growth||{};
+  compTruncated = !!(data.comp && data.comp.truncated);
   const u = getUnitLabel();          // g, ml, or units
   const uFull = getUnitFull();       // grams, milliliters, or units
   const specific = hasSpecificCategory();
