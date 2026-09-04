@@ -1081,13 +1081,33 @@ def _comp_window(start: str, end: str, comp_start: str, comp_end: str,
     cur_s, cur_e = _ts(start, st), _ts(end, et)
     cs_ts, ce_ts = _ts(comp_start, st), _ts(comp_end, et)
     truncated = False
+
+    # Which END of the comparison window to trim depends on what it represents.
+    # A CONTIGUOUS "previous period" (comp_end is the day right before start)
+    # ends at a real boundary, so the meaningful sub-window is the LAST
+    # `elapsed` of it -> trim the START (end-anchored). This is what Shopify
+    # does. An OFFSET comparison (MoM / WoW / YoY: the window sits a whole
+    # month/week/year back and BEGINS at the equivalent point) must instead
+    # trim the END, so "Sep 1-4 to 09:10" is read against "Aug 1-4 to 09:10".
+    try:
+        contiguous = (datetime.strptime(comp_end, "%Y-%m-%d").date()
+                      == datetime.strptime(start, "%Y-%m-%d").date() - timedelta(days=1))
+    except Exception:
+        contiguous = False
+
     mx = _data_max_ts(store)
     if mx is not None:
         mx_b = mx.astimezone(BERLIN_TZ) if mx.tzinfo else mx.replace(tzinfo=timezone.utc).astimezone(BERLIN_TZ)
         if cur_s < mx_b < cur_e:
-            capped = cs_ts + (mx_b - cur_s)
-            if capped < ce_ts:
-                ce_ts, truncated = capped, True
+            elapsed = mx_b - cur_s
+            if contiguous:
+                capped = ce_ts - elapsed
+                if capped > cs_ts:
+                    cs_ts, truncated = capped, True
+            else:
+                capped = cs_ts + elapsed
+                if capped < ce_ts:
+                    ce_ts, truncated = capped, True
     return cs_ts, ce_ts, truncated
 
 
@@ -2246,8 +2266,11 @@ async def api_recon_combined(
     try:
         _pcts, _pcte, _ptrunc = _comp_window(s, e, comp_s, comp_e, stime, etime, store)
         if _ptrunc:
+            # _comp_window may trim either end (see its docstring), so mirror
+            # whichever bound actually moved.
+            comp_s = _pcts.strftime("%Y-%m-%d")
             comp_e = _pcte.strftime("%Y-%m-%d")
-            p_stime = stime or "00:00"
+            p_stime = _pcts.strftime("%H:%M")
             p_etime = _pcte.strftime("%H:%M")
     except Exception as exc:
         logger.warning("patients comparison window calc failed: %s", exc)
