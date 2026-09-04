@@ -220,6 +220,14 @@
     .container { padding:16px; }
     .header { padding:14px 16px; }
   }
+  /* Floating jump button: down to Patient Insights, back up again */
+  .jump-btn {
+    position: fixed; bottom: 22px; right: 22px; z-index: 50;
+    background: #1a0a2e; color: #fff; border: none; border-radius: 999px;
+    padding: 10px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25); opacity: 0.92;
+  }
+  .jump-btn:hover { opacity: 1; }
 </style>
 </head>
 <body>
@@ -410,7 +418,8 @@
 </div>
 
 <!-- SECTION 6: PATIENTS -->
-<div class="section-title"><span class="num">5</span> Patient Insights</div>
+<button class="jump-btn" id="jumpBtn" title="Jump to Patient Insights, or back to the top">↓ Patient Insights</button>
+<div class="section-title" id="patientSection"><span class="num">5</span> Patient Insights</div>
 <div class="grid grid-3">
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">New vs Returning</div><div class="chart-box" style="height:280px;"><canvas id="chartPatients"></canvas></div></div>
   <div class="card"><div style="font-weight:600;font-size:13px;margin-bottom:8px;">Age Segments</div><div class="chart-box" style="height:280px;"><canvas id="chartAge"></canvas></div></div>
@@ -1367,6 +1376,34 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadAll();
 });
 
+
+// Jump button: points down to Patient Insights, flips to "Top" once you are
+// there, so one button gets you both ways.
+(function () {
+  const btn = document.getElementById('jumpBtn');
+  if (!btn) return;
+  let mode = '';
+  function setMode(next) {
+    if (next === mode) return;
+    mode = next;
+    btn.textContent = mode === 'down' ? '\u2193 Patient Insights' : '\u2191 Top';
+  }
+  function refresh() {
+    const t = document.getElementById('patientSection');
+    const arrived = t ? t.getBoundingClientRect().top <= window.innerHeight * 0.5 : false;
+    setMode(arrived ? 'up' : 'down');
+  }
+  btn.addEventListener('click', () => {
+    if (mode === 'down') {
+      document.getElementById('patientSection')?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  });
+  window.addEventListener('scroll', refresh, { passive: true });
+  window.addEventListener('resize', refresh, { passive: true });
+  refresh();
+})();
 </script>
 </body>
 </html>

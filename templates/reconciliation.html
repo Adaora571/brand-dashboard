@@ -564,7 +564,7 @@
 </div>
 </div>
 
-<button class="jump-btn" onclick="document.getElementById('patientSection').scrollIntoView({behavior:'smooth'})" title="Jump to Patient Insights">↓ Patient Insights</button>
+<button class="jump-btn" id="jumpBtn" title="Jump to Patient Insights, or back to the top">↓ Patient Insights</button>
 
 <!-- SECTION 3: PRODUCT PERFORMANCE -->
 <div class="section-title"><span class="num">3</span> Product Performance <span class="filter-tag" id="filterTag"></span></div>
@@ -2552,6 +2552,36 @@ function formatChange(curr, prev) {
   return `<span class="${cls}">${sym}${Math.abs(pct)}% ${label}</span>`;
 }
 
+
+// ── Jump button: points down to Patient Insights, flips to "Top" once you
+// are there, so one button gets you both ways. ──
+(function () {
+  const btn = document.getElementById('jumpBtn');
+  if (!btn) return;
+  let mode = '';
+  function setMode(next) {
+    if (next === mode) return;
+    mode = next;
+    btn.textContent = mode === 'down' ? '↓ Patient Insights' : '↑ Top';
+  }
+  function refresh() {
+    const t = document.getElementById('patientSection');
+    // Once the Patient Insights heading reaches the upper half of the
+    // viewport, you have arrived — offer the way back up instead.
+    const arrived = t ? t.getBoundingClientRect().top <= window.innerHeight * 0.5 : false;
+    setMode(arrived ? 'up' : 'down');
+  }
+  btn.addEventListener('click', () => {
+    if (mode === 'down') {
+      document.getElementById('patientSection')?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  });
+  window.addEventListener('scroll', refresh, { passive: true });
+  window.addEventListener('resize', refresh, { passive: true });
+  refresh();
+})();
 </script>
 
 </body>
