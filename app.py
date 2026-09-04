@@ -1338,6 +1338,11 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
         SUM(oi.quantity_after_cancellations) AS sales_volume_g,
         (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur,
+        -- Shopify "Net sales" equivalent: products ex VAT after discounts + the
+        -- Rx fee after its own discounts (Rezeptgebühr is taxed at 0%, so no VAT
+        -- to strip). Still order-date based, so reversals differ from Shopify.
+        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
+         + COALESCE(SUM(oi.prescription_fees.allocated_value_after_cancellations_and_discounts_eur),0)) AS net_sales_fee_eur,
         SAFE_DIVIDE(SUM(oi.cancelled_quantity), SUM(oi.quantity_before_cancellations)) AS cancellation_rate,
         SAFE_DIVIDE(SUM(oi.quantity_after_cancellations), COUNT(DISTINCT o.order_id)) AS avg_g_per_prescription,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
@@ -1378,6 +1383,11 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur) AS revenue_eur,
         SUM(oi.quantity_after_cancellations) AS sales_volume_g,
         (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur,
+        -- Shopify "Net sales" equivalent: products ex VAT after discounts + the
+        -- Rx fee after its own discounts (Rezeptgebühr is taxed at 0%, so no VAT
+        -- to strip). Still order-date based, so reversals differ from Shopify.
+        (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
+         + COALESCE(SUM(oi.prescription_fees.allocated_value_after_cancellations_and_discounts_eur),0)) AS net_sales_fee_eur,
         COUNT(DISTINCT o.customer_id) AS total_patients,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), NULLIF(SUM(oi.quantity_after_cancellations),0)) AS avg_eur_per_g,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
@@ -1410,6 +1420,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     SELECT
       c.*, p.prescriptions AS prev_rx, p.revenue_eur AS prev_rev,
       p.sales_volume_g AS prev_vol, p.net_revenue_eur AS prev_net,
+      p.net_sales_fee_eur AS prev_net_sales_fee,
       p.total_patients AS prev_patients, p.avg_eur_per_g AS prev_epg,
       p.avg_order_value AS prev_aov, p.avg_g_per_prescription AS prev_gpo,
       rp.repeat_purchase_rate, pr.repeat_purchase_rate AS prev_repeat_rate
@@ -1438,6 +1449,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "revenue_eur": r.get("revenue_eur"),
             "sales_volume_g": r.get("sales_volume_g"),
             "net_revenue_eur": r.get("net_revenue_eur"),
+            "net_sales_fee_eur": r.get("net_sales_fee_eur"),
             "cancellation_rate": r.get("cancellation_rate"),
             "avg_g_per_prescription": r.get("avg_g_per_prescription"),
             "avg_eur_per_g": r.get("avg_eur_per_g"),
@@ -1451,6 +1463,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "revenue_eur": r.get("prev_rev"),
             "sales_volume_g": r.get("prev_vol"),
             "net_revenue_eur": r.get("prev_net"),
+            "net_sales_fee_eur": r.get("prev_net_sales_fee"),
             "total_patients": r.get("prev_patients"),
             "avg_eur_per_g": r.get("prev_epg"),
             "avg_order_value": r.get("prev_aov"),
@@ -1462,6 +1475,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "revenue": safe_growth(r.get("revenue_eur"), r.get("prev_rev")),
             "volume": safe_growth(r.get("sales_volume_g"), r.get("prev_vol")),
             "net_revenue": safe_growth(r.get("net_revenue_eur"), r.get("prev_net")),
+            "net_sales_fee": safe_growth(r.get("net_sales_fee_eur"), r.get("prev_net_sales_fee")),
             "total_patients": safe_growth(r.get("total_patients"), r.get("prev_patients")),
             "avg_eur_per_g": safe_growth(r.get("avg_eur_per_g"), r.get("prev_epg")),
             "avg_order_value": safe_growth(r.get("avg_order_value"), r.get("prev_aov")),
@@ -2330,6 +2344,7 @@ async def api_recon_combined(
         "revenue": cur.get("revenue_eur"),
         "volume": cur.get("sales_volume_g"),
         "net_revenue": cur.get("net_revenue_eur"),
+        "net_sales_fee": cur.get("net_sales_fee_eur"),
         "total_fee": fee_amt,
         "ppo": cur.get("avg_products_per_order"),
         "epg": cur.get("avg_eur_per_g"),
@@ -2347,6 +2362,7 @@ async def api_recon_combined(
         "revenue": prev_data.get("revenue_eur"),
         "volume": prev_data.get("sales_volume_g"),
         "net_revenue": prev_data.get("net_revenue_eur"),
+        "net_sales_fee": prev_data.get("net_sales_fee_eur"),
         "num_patients": prev_data.get("total_patients"),
         "epg": prev_data.get("avg_eur_per_g"),
         "aov": prev_data.get("avg_order_value"),
