@@ -683,10 +683,13 @@ async def run_query_async(sql: str, params: list = None):
 
 
 # Remap product_vertical for new categories not yet tagged in BQ.
-# Products with "Kapseln"/"Kapsel" in the name → 'capsule', "Spray" → 'spray'.
+# Products with "Kapseln"/"Kapsel" in the name → 'capsule', "Spray" → 'spray',
+# "Tropfen" (droppers, e.g. AlephSana Dronabinol Tropfen) → 'drops'.
+# Each rule self-retires once the data team tags product_vertical in BQ.
 CATEGORY_EXPR = """CASE
   WHEN LOWER(oi.product_name) LIKE '%kapseln%' OR LOWER(oi.product_name) LIKE '%kapsel%' THEN 'capsule'
   WHEN LOWER(oi.product_name) LIKE '%spray%' THEN 'spray'
+  WHEN LOWER(oi.product_name) LIKE '%tropfen%' THEN 'drops'
   ELSE oi.product_vertical
 END"""
 
@@ -2875,14 +2878,15 @@ async def data_freshness():
 # response instead of waiting on BigQuery.
 # ============================================================
 def _default_range() -> tuple[str, str, str, str]:
-    """Default dashboard range (quarter-to-date, Berlin) plus its
-    'previous period' comparison — mirrors the frontend defaults."""
+    """Default dashboard range (month-to-date, Berlin) plus its
+    'previous period' comparison — mirrors the frontend defaults
+    (reconciliation.html: dpActivePreset = 'mtd')."""
     today = datetime.now(BERLIN_TZ).date()
-    qstart = date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
-    dayspan = (today - qstart).days
-    cend = qstart - timedelta(days=1)
-    cstart = qstart - timedelta(days=dayspan + 1)
-    return str(qstart), str(today), str(cstart), str(cend)
+    mstart = date(today.year, today.month, 1)
+    dayspan = (today - mstart).days
+    cend = mstart - timedelta(days=1)
+    cstart = mstart - timedelta(days=dayspan + 1)
+    return str(mstart), str(today), str(cstart), str(cend)
 
 
 async def _warm_default_views():

@@ -202,6 +202,7 @@
   .filter-group { display:flex; flex-direction:column; gap:2px; }
   .filter-group label { font-size:10px; color:var(--muted); text-transform:uppercase; font-weight:600; letter-spacing:0.3px; }
   .filter-select { border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; min-width:140px; background:#fff; }
+  .prod-search { min-width:200px; }
   .btn-clear-filters { background:#f1f5f9; color:var(--muted); border:1px solid var(--border); border-radius:6px; padding:6px 14px; font-size:11px; cursor:pointer; font-weight:500; margin-left:auto; }
   .btn-clear-filters:hover { background:#e2e8f0; color:var(--text); }
   .filter-tag { font-size:11px; color:var(--accent); font-weight:500; margin-left:8px; }
@@ -421,8 +422,8 @@
           <button class="preset-btn" data-preset="last90" onclick="selectPreset(this)">Last 90 days</button>
           <button class="preset-btn" data-preset="last12m" onclick="selectPreset(this)">Last 12 months</button>
           <button class="preset-btn" data-preset="lastmonth" onclick="selectPreset(this)">Last Month</button>
-          <button class="preset-btn" data-preset="mtd" onclick="selectPreset(this)">Month to date</button>
-          <button class="preset-btn active" data-preset="qtd" onclick="selectPreset(this)">Quarter to date</button>
+          <button class="preset-btn active" data-preset="mtd" onclick="selectPreset(this)">Month to date</button>
+          <button class="preset-btn" data-preset="qtd" onclick="selectPreset(this)">Quarter to date</button>
           <button class="preset-btn" data-preset="ytd" onclick="selectPreset(this)">Year to date</button>
           <button class="preset-btn" data-preset="custom" onclick="selectPreset(this)">Custom</button>
         </div>
@@ -586,6 +587,10 @@
   <div class="filter-group">
     <label>Origin</label>
     <select class="filter-select" id="filterOrigin" onchange="applyProductFilters()"><option value="">All Origins</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Search</label>
+    <input type="search" class="filter-select prod-search" id="filterSearch" placeholder="Product, brand, category…" oninput="applyProductFilters()" autocomplete="off">
   </div>
   <button class="btn-clear-filters" onclick="clearProductFilters()">Clear Filters</button>
   <button class="btn-export-csv" onclick="exportProductCSV()" style="margin-left:auto; padding:6px 16px; background:#1a0a2e; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">⬇ Export CSV</button>
@@ -1026,11 +1031,11 @@ async function initBrands() {
   }
   buildMsOptions('brand', brandItems, selectedBrands);
 
-  // Compute default comparison dates (QTD) before first load
+  // Default range = month-to-date (+ like-for-like previous period).
+  // Keep in sync with app.py _default_range() so the cache warmer pre-computes this exact view.
   const todayStr = isoDate(new Date());
   const todayDate = new Date();
-  const qMonth = Math.floor(todayDate.getMonth() / 3) * 3; // 0=Jan,3=Apr,6=Jul,9=Oct
-  const qStart = isoDate(new Date(todayDate.getFullYear(), qMonth, 1));
+  const qStart = isoDate(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
   document.getElementById('startDate').value = qStart;
   document.getElementById('endDate').value = todayStr;
   document.getElementById('dpFrom').value = qStart;
@@ -2011,6 +2016,18 @@ function renderProducts() {
   renderProductTable();
 }
 
+// Free-text search over the product table: every whitespace-separated term
+// must appear in the product name, brand, category or origin (case-insensitive).
+function applyProductSearch(rows) {
+  const q = (document.getElementById('filterSearch')?.value || '').trim().toLowerCase();
+  if (!q) return rows;
+  const terms = q.split(/\s+/).filter(Boolean);
+  return rows.filter(p => {
+    const hay = [p.name, p.brand, p.category, p.origin].map(v => String(v ?? '').toLowerCase()).join(' ');
+    return terms.every(t => hay.includes(t));
+  });
+}
+
 function renderProductTable() {
   const brand    = document.getElementById('filterBrand')?.value || '';
   const category = document.getElementById('filterCategory')?.value || '';
@@ -2020,6 +2037,7 @@ function renderProductTable() {
   if (brand)    filtered = filtered.filter(p => p.brand === brand);
   if (category) filtered = filtered.filter(p => p.category === category);
   if (origin)   filtered = filtered.filter(p => p.origin === origin);
+  filtered = applyProductSearch(filtered);
 
   // Apply Google Sheets column filters
   for (const [ci, f] of Object.entries(colFilters.prod)) {
@@ -2070,7 +2088,8 @@ function applyProductFilters() {
   const brand    = document.getElementById('filterBrand').value;
   const category = document.getElementById('filterCategory').value;
   const origin   = document.getElementById('filterOrigin').value;
-  const active = [region, brand, category, origin].filter(Boolean);
+  const search   = (document.getElementById('filterSearch')?.value || '').trim();
+  const active = [region, brand, category, origin, search ? `"${search}"` : ''].filter(Boolean);
   document.getElementById('filterTag').textContent = active.length > 0 ? `— filtered by: ${active.join(', ')}` : '';
 
   // Product Line filter affects entire page (server-side)
@@ -2088,6 +2107,7 @@ function clearProductFilters() {
   document.getElementById('filterBrand').value = '';
   document.getElementById('filterCategory').value = '';
   document.getElementById('filterOrigin').value = '';
+  const _fs = document.getElementById('filterSearch'); if (_fs) _fs.value = '';
   document.getElementById('filterTag').textContent = '';
   colFilters.prod = {};
   updateFilterBtnStates();
@@ -2143,6 +2163,7 @@ function exportProductCSV() {
   if (brand)    filtered = filtered.filter(p => p.brand === brand);
   if (category) filtered = filtered.filter(p => p.category === category);
   if (origin)   filtered = filtered.filter(p => p.origin === origin);
+  filtered = applyProductSearch(filtered);
   for (const [ci, f] of Object.entries(colFilters.prod)) {
     const field = PROD_FIELDS[ci];
     filtered = filtered.filter(r => {
@@ -2316,7 +2337,7 @@ function sortColumn(table, colIndex, asc) {
 
 // Date picker functions
 // ── Date picker state ──
-let dpActivePreset = 'qtd';
+let dpActivePreset = 'mtd';
 let dpCompareOn = true;
 let dpCompareMode = 'prev';
 
