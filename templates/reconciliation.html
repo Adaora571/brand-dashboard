@@ -523,24 +523,11 @@
   <div class="card" style="overflow-x:auto;">
     <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Fee Breakdown</div>
     <table class="fee-table" id="feeTableEl">
-      <thead>
-        <tr>
-          <th>Period <button class="col-filter-btn" onclick="openColFilter(event,'fee',0)">▼</button></th>
-          <th class="r">Net Units <button class="col-filter-btn" onclick="openColFilter(event,'fee',1)">▼</button></th>
-          <th class="r">Net Revenue <button class="col-filter-btn" onclick="openColFilter(event,'fee',2)">▼</button></th>
-          <th class="r">Rate</th>
-          <th class="r">Fee <button class="col-filter-btn" onclick="openColFilter(event,'fee',3)">▼</button></th>
-        </tr>
-      </thead>
+      <thead id="feeHead"></thead>
       <tbody id="feeBody"></tbody>
-      <tfoot><tr>
-        <td style="font-weight:700;">Total</td>
-        <td class="r" id="feeTotalVol">—</td>
-        <td class="r" id="feeTotalRev">—</td>
-        <td class="r" style="color:#888;">—</td>
-        <td class="r" style="color:#92400e;" id="feeTotalAmt">—</td>
-      </tr></tfoot>
+      <tfoot id="feeFoot"></tfoot>
     </table>
+    <div id="feeNote" style="font-size:11px;color:#64748b;margin-top:6px;"></div>
   </div>
 </div>
 </div><!-- /feeSection -->
@@ -553,6 +540,8 @@
     <thead>
       <tr>
         <th style="cursor:pointer;" onclick="sortMfrTable('manufacturer')">Manufacturer ▼</th>
+        <th class="r mfr-sv-col" style="cursor:pointer;" onclick="sortMfrTable('_std_units')">Units excl. Super Value ▼</th>
+        <th class="r mfr-sv-col" style="cursor:pointer;" onclick="sortMfrTable('sv_units')">Super Value Units ▼</th>
         <th class="r" style="cursor:pointer;" onclick="sortMfrTable('volume_units')">Net Units Sold ▼</th>
         <th class="r" style="cursor:pointer;" onclick="sortMfrTable('net_revenue_eur')">Net Revenue € ▼</th>
         <th class="r">% of Total Revenue</th>
@@ -750,6 +739,7 @@ const PALETTE = [
 // Template data
 const BRANDS_DATA = {{ brands | tojson }};
 const FEES_DATA = {{ fees | tojson }};
+const SV_FEE = {{ sv_fee | tojson }};
 const QUARTERLY_TARGETS = {{ quarterly_targets | tojson }};
 const STORE = {{ store | tojson }};
 const FEATURES = {{ features | tojson }};
@@ -1248,42 +1238,66 @@ function renderDealTerms() {
   }
 
   document.getElementById('dealValue').textContent = fee.label || fee.rate + '%';
-  document.getElementById('dealDesc').textContent = fee.desc || '';
+  document.getElementById('dealDesc').textContent = (fee.desc || '')
+    + (FEATURES.collections ? ' · Super Value flowers: €' + Number(SV_FEE?.rate ?? 0.2).toFixed(2) + '/g' : '');
   document.getElementById('dealType').textContent = fee.type || 'Fixed';
   document.getElementById('dealCalc').textContent = '€ ' + formatNum(allData.kpi?.[0]?.total_fee || 0);
 }
 
 function renderFees() {
   currentFees = allData.fee_detail || [];
-  if (!currentFees.length) {
-    document.getElementById('feeTableEl').style.display = 'none';
-    return;
-  }
+  const tbl = document.getElementById('feeTableEl');
+  if (!currentFees.length) { tbl.style.display = 'none'; return; }
+  tbl.style.display = '';
 
-  let html = '';
-  let totVol = 0, totRev = 0, totFee = 0;
-
+  // Which parts of the fee base to show follows the Collection filter:
+  //   All Collections -> Standard (brand deal) + Super Value + Total
+  //   Super Value     -> Super Value only
+  //   Excl. SV        -> Standard only
   const feeInfo = FEES_DATA[selectedBrands.size === 1 ? [...selectedBrands][0] : ''] || {};
-  currentFees.forEach(row => {
-    totVol += row.units || 0;
-    totRev += row.revenue || 0;
-    totFee += row.fee || 0;
-    const rateDisplay = feeInfo.type === 'per_gram' ? ('€' + row.rate.toFixed(2) + '/g')
-      : feeInfo.type === 'percentage' ? ((row.rate * 100).toFixed(2) + '%')
-      : feeInfo.label || '—';
-    html += `<tr>
-      <td>${row.period || '—'}</td>
-      <td class="r">${formatNum(row.units)}</td>
-      <td class="r">${formatCurr(row.revenue)}</td>
-      <td class="r">${rateDisplay}</td>
-      <td class="r">${formatCurr(row.fee)}</td>
-    </tr>`;
-  });
+  const showStd = selectedCollection !== 'super-value';
+  const showSV  = FEATURES.collections && selectedCollection !== 'excl-super-value';
+  const split   = showStd && showSV;
+  const stdRate = feeInfo.type === 'per_gram' ? ('€' + Number(feeInfo.rate).toFixed(2) + '/g')
+    : feeInfo.type === 'percentage' ? ((feeInfo.rate * 100).toFixed(2) + '%')
+    : (feeInfo.label || '—');
+  const hasOverrides = SV_FEE && SV_FEE.overrides && Object.keys(SV_FEE.overrides).length;
+  const svRate = '€' + Number(SV_FEE?.rate ?? 0.2).toFixed(2) + '/g' + (hasOverrides ? '*' : '');
 
-  document.getElementById('feeBody').innerHTML = html;
-  document.getElementById('feeTotalVol').textContent = formatNum(totVol);
-  document.getElementById('feeTotalRev').textContent = formatCurr(totRev);
-  document.getElementById('feeTotalAmt').textContent = formatCurr(totFee);
+  const g = (label, rate) => `<th class="r" colspan="3" style="text-align:center;border-bottom:1px solid var(--border);">${label}<br><span style="font-weight:500;text-transform:none;">${rate}</span></th>`;
+  const sub = '<th class="r">Net Units</th><th class="r">Net Revenue</th><th class="r">Fee</th>';
+  let head = '<tr><th rowspan="2" style="vertical-align:bottom;">Period</th>';
+  if (showStd) head += g(split ? 'Standard (excl. Super Value)' : 'Excl. Super Value', stdRate);
+  if (showSV)  head += g('Super Value', svRate);
+  if (split)   head += '<th class="r" rowspan="2" style="vertical-align:bottom;">Total Fee</th>';
+  head += '</tr><tr>' + (showStd ? sub : '') + (showSV ? sub : '') + '</tr>';
+  document.getElementById('feeHead').innerHTML = head;
+
+  const t = { su:0, sr:0, sf:0, vu:0, vr:0, vf:0 };
+  let body = '';
+  currentFees.forEach(row => {
+    const su = row.std_units ?? row.units ?? 0, sr = row.std_revenue ?? row.revenue ?? 0, sf = row.std_fee ?? row.fee ?? 0;
+    const vu = row.sv_units || 0, vr = row.sv_revenue || 0, vf = row.sv_fee || 0;
+    t.su += su; t.sr += sr; t.sf += sf; t.vu += vu; t.vr += vr; t.vf += vf;
+    body += `<tr><td>${row.period || '—'}</td>`;
+    if (showStd) body += `<td class="r">${formatNum(su)}</td><td class="r">${formatCurr(sr)}</td><td class="r">${formatCurr(sf)}</td>`;
+    if (showSV)  body += `<td class="r">${formatNum(vu)}</td><td class="r">${formatCurr(vr)}</td><td class="r">${formatCurr(vf)}</td>`;
+    if (split)   body += `<td class="r" style="font-weight:600;">${formatCurr(sf + vf)}</td>`;
+    body += '</tr>';
+  });
+  document.getElementById('feeBody').innerHTML = body;
+
+  let foot = '<tr><td style="font-weight:700;">Total</td>';
+  if (showStd) foot += `<td class="r">${formatNum(t.su)}</td><td class="r">${formatCurr(t.sr)}</td><td class="r" style="color:#92400e;">${formatCurr(t.sf)}</td>`;
+  if (showSV)  foot += `<td class="r">${formatNum(t.vu)}</td><td class="r">${formatCurr(t.vr)}</td><td class="r" style="color:#92400e;">${formatCurr(t.vf)}</td>`;
+  if (split)   foot += `<td class="r" style="color:#92400e;" id="feeTotalAmt">${formatCurr(t.sf + t.vf)}</td>`;
+  foot += '</tr>';
+  document.getElementById('feeFoot').innerHTML = foot;
+
+  document.getElementById('feeNote').textContent = FEATURES.collections
+    ? 'Fee base = flowers & extracts. Super Value flowers pay ' + svRate.replace('*','') + ' for every brand, replacing the brand deal on those grams'
+      + (hasOverrides ? '; * a few products at a different SV rate.' : '.')
+    : '';
 }
 
 function renderCharts() {
@@ -1390,35 +1404,22 @@ function renderFeeChart() {
   const fees = allData.fee_detail || [];
   const ctx = document.getElementById('chartFee').getContext('2d');
   if (charts.fee) charts.fee.destroy();
-
+  const showStd = selectedCollection !== 'super-value';
+  const showSV  = FEATURES.collections && selectedCollection !== 'excl-super-value';
+  const ds = [];
+  if (showStd) ds.push({ label: showSV ? 'Standard' : 'Fee', data: fees.map(x => x.std_fee ?? x.fee), backgroundColor: COLORS.orange, stack: 'fee' });
+  if (showSV)  ds.push({ label: 'Super Value', data: fees.map(x => x.sv_fee || 0), backgroundColor: '#fbbf24', stack: 'fee' });
   charts.fee = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: fees.map(x => x.period),
-      datasets: [{
-        label: 'Fee Amount',
-        data: fees.map(x => x.fee),
-        borderColor: COLORS.orange,
-        borderWidth: 2,
-        backgroundColor: 'rgba(234, 88, 12, 0.1)',
-        fill: true,
-        tension: 0.3,
-      }]
-    },
+    type: 'bar',
+    data: { labels: fees.map(x => x.period), datasets: ds },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        datalabels: {
-          display: true,
-          anchor: 'end',
-          align: 'top',
-          font: { size: 9 },
-          color: '#1e293b',
-          formatter: v => fmtLabel(v),
-        }
+        legend: { display: ds.length > 1 },
+        datalabels: { display: false },
       },
-      scales: { y: { beginAtZero: true, ticks: { callback: v => '€' + v.toLocaleString() } } }
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { callback: v => '€' + v.toLocaleString() } } }
     }
   });
 }
@@ -1859,7 +1860,7 @@ function renderManufacturerTable() {
     const target = r.slug ? getProRatedTarget(r.slug, startStr, endStr) : null;
     const volumeKg = (r.volume_units || 0) / 1000;
     const pctAchieved = target ? (volumeKg / target * 100) : null;
-    return { ...r, _target_kg: target, _pct_achieved: pctAchieved };
+    return { ...r, _target_kg: target, _pct_achieved: pctAchieved, sv_units: r.sv_units || 0, _std_units: (r.volume_units || 0) - (r.sv_units || 0) };
   });
 
   const sorted = [...enriched].sort((a, b) => {
@@ -1877,6 +1878,12 @@ function renderManufacturerTable() {
 
   const totalRev = sorted.reduce((s, r) => s + (r.net_revenue_eur || 0), 0);
   const totalVol = sorted.reduce((s, r) => s + (r.volume_units || 0), 0);
+  // Super Value split columns: only meaningful when viewing All Collections
+  const showSvCols = FEATURES.collections && !selectedCollection;
+  document.querySelectorAll('#mfrTableEl .mfr-sv-col').forEach(th => { th.style.display = showSvCols ? '' : 'none'; });
+  const totalSv = sorted.reduce((s, r) => s + (r.sv_units || 0), 0);
+  const fmtU = v => Math.round(v || 0).toLocaleString('en-US');
+  const svCells = r => showSvCols ? `<td class="r">${fmtU((r.volume_units || 0) - (r.sv_units || 0))}</td><td class="r">${fmtU(r.sv_units)}</td>` : '';
   let totalTargetKg = 0;
   let hasAnyTarget = false;
 
@@ -1904,6 +1911,7 @@ function renderManufacturerTable() {
 
     return `<tr data-hlkey="${hlAttr(r.manufacturer)}"${hlSets.mfr.has(String(r.manufacturer)) ? ' class="hl-row"' : ''}>
       <td style="font-weight:600;">${r.manufacturer}</td>
+      ${svCells(r)}
       <td class="r">${Math.round(r.volume_units || 0).toLocaleString('en-US')}</td>
       <td class="r">€${Math.round(r.net_revenue_eur || 0).toLocaleString('en-US')}</td>
       <td class="r">${pct}%</td>
@@ -1930,6 +1938,7 @@ function renderManufacturerTable() {
   const tfoot = document.getElementById('mfrFoot');
   tfoot.innerHTML = `<tr>
     <td style="font-weight:700;">Total</td>
+    ${showSvCols ? `<td class="r" style="font-weight:700;">${fmtU(totalVol - totalSv)}</td><td class="r" style="font-weight:700;">${fmtU(totalSv)}</td>` : ''}
     <td class="r" style="font-weight:700;">${Math.round(totalVol).toLocaleString('en-US')}</td>
     <td class="r" style="font-weight:700;">€${Math.round(totalRev).toLocaleString('en-US')}</td>
     <td class="r" style="font-weight:700;">100%</td>

@@ -504,8 +504,8 @@ MANUFACTURER_FEES = {
         "notes": "",
     },
     "demecan": {
-        "type": "fixed", "rate": 50000,
-        "label": "€50,000 / month", "desc": "Fixed monthly fee",
+        "type": "per_gram", "rate": 0.83,
+        "label": "€0.83 / g", "desc": "Per-gram fee on flowers & extracts (Super Value flowers: separate SV rate)",
         "effective_date": "2024-03-01",
         "notes": "",
     },
@@ -730,6 +730,57 @@ SUPER_VALUE_FILTER_EXPR = (
     f"(({CATEGORY_EXPR}) = 'flower' AND oi.product_id IN ({SUPER_VALUE_IDS_SQL}))"
 )
 SUPER_VALUE_EXCLUDE_EXPR = f"(NOT {SUPER_VALUE_FILTER_EXPR})"
+
+# ── Super Value fee (reconciliation) ─────────────────────────
+# Super Value flowers carry their own per-gram fee for EVERY brand,
+# replacing the brand's normal deal (incl. percentage deals) on those grams.
+# Standard rate €0.20/g; a few products can be €0.40/g - list them in
+# SUPER_VALUE_FEE_OVERRIDES as {"<product name LIKE pattern>": rate}.
+SUPER_VALUE_FEE_RATE = 0.20
+SUPER_VALUE_FEE_OVERRIDES: dict[str, float] = {
+    # e.g. '%Triangle Mints%': 0.40,
+}
+
+def _sv_rate_sql() -> str:
+    if not SUPER_VALUE_FEE_OVERRIDES:
+        return str(SUPER_VALUE_FEE_RATE)
+    whens = " ".join(
+        f"WHEN oi.product_name LIKE '{pat.replace(chr(39), chr(39)*2)}' THEN {float(rate)}"
+        for pat, rate in SUPER_VALUE_FEE_OVERRIDES.items())
+    return f"(CASE {whens} ELSE {SUPER_VALUE_FEE_RATE} END)"
+
+
+def fee_split_cols(store: str, indent: str = "      ") -> str:
+    """Extra SELECT columns splitting the fee base (flowers & extracts) into
+    standard (brand deal) and Super Value parts. Stores without fees or
+    without the Super Value collection get zero SV columns."""
+    net = "(oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0))"
+    has_sv = store_cfg(store)["features"].get("collections") and store_cfg(store)["features"].get("fees")
+    if not has_sv:
+        return (f"{indent}SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS std_fee_volume_g,\n"
+                f"{indent}SUM(CASE WHEN {FEE_CAT_FILTER} THEN {net} ELSE 0 END) AS std_fee_net_revenue_eur,\n"
+                f"{indent}0 AS sv_fee_volume_g, 0 AS sv_fee_net_revenue_eur, 0 AS sv_fee_eur")
+    sv = SUPER_VALUE_FILTER_EXPR
+    return (f"{indent}SUM(CASE WHEN {FEE_CAT_FILTER} AND NOT {sv} THEN oi.quantity_after_cancellations ELSE 0 END) AS std_fee_volume_g,\n"
+            f"{indent}SUM(CASE WHEN {FEE_CAT_FILTER} AND NOT {sv} THEN {net} ELSE 0 END) AS std_fee_net_revenue_eur,\n"
+            f"{indent}SUM(CASE WHEN {sv} THEN oi.quantity_after_cancellations ELSE 0 END) AS sv_fee_volume_g,\n"
+            f"{indent}SUM(CASE WHEN {sv} THEN {net} ELSE 0 END) AS sv_fee_net_revenue_eur,\n"
+            f"{indent}SUM(CASE WHEN {sv} THEN oi.quantity_after_cancellations * {_sv_rate_sql()} ELSE 0 END) AS sv_fee_eur")
+
+
+def sv_units_col(store: str) -> str:
+    """SELECT column: units sold that are Super Value flowers (0 where the
+    store has no Super Value collection)."""
+    if not store_cfg(store)["features"].get("collections"):
+        return "0 AS sv_units"
+    return f"SUM(CASE WHEN {SUPER_VALUE_FILTER_EXPR} THEN oi.quantity_after_cancellations ELSE 0 END) AS sv_units"
+
+
+def calc_fee_split(fee_info: dict, r: dict) -> tuple[float, float, float]:
+    """(total, standard, super_value) fee for a row carrying fee_split_cols."""
+    std = calc_fee(fee_info, r.get("std_fee_volume_g", 0), r.get("std_fee_net_revenue_eur", 0))
+    sv = float(r.get("sv_fee_eur") or 0) if fee_info else 0.0
+    return std + sv, std, sv
 
 
 def _split_category_param(category: str) -> tuple[list, bool, bool, list]:
@@ -1353,7 +1404,8 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         COUNT(DISTINCT o.customer_id) AS total_patients,
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
         SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
-        SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
+        SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur,
+{fee_split_cols(store, "        ")}
       FROM `{_DS}.order_items` oi
       JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1439,7 +1491,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     rows = run_query(sql, params)
     r = rows[0] if rows else {}
     fee = MANUFACTURER_FEES.get(slug, {})
-    fee_amount = calc_fee(fee, r.get("fee_volume_g", 0), r.get("fee_net_revenue_eur", 0))
+    fee_amount, fee_std, fee_sv = calc_fee_split(fee, r)
 
     def safe_growth(curr, prev):
         if curr is None or prev is None or prev == 0:
@@ -1485,7 +1537,8 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "avg_g_per_prescription": safe_growth(r.get("avg_g_per_prescription"), r.get("prev_gpo")),
             "repeat_purchase_rate": safe_growth(r.get("repeat_purchase_rate"), r.get("prev_repeat_rate")),
         },
-        "fee": {"amount": fee_amount},
+        "fee": {"amount": fee_amount, "standard": fee_std, "super_value": fee_sv,
+                "std_volume_g": r.get("std_fee_volume_g", 0), "sv_volume_g": r.get("sv_fee_volume_g", 0)},
         "comp": _comp_info,
     }
     cache_set(ck, result)
@@ -1538,7 +1591,8 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
       SUM(oi.refund_amount_including_vat_eur) AS refund_eur,
       SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate,
       SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
-      SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur
+      SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur,
+{fee_split_cols(store)}
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1549,7 +1603,7 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
 
     fee = MANUFACTURER_FEES.get(slug, {})
     for r in rows:
-        r["fee_amount"] = calc_fee(fee, r.get("fee_volume_g", 0), r.get("fee_net_revenue_eur", 0))
+        r["fee_amount"], r["fee_std"], r["fee_sv"] = calc_fee_split(fee, r)
 
     result = {"data": rows}
     cache_set(ck, result)
@@ -1768,6 +1822,7 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
     mfr_sql = f"""
     SELECT COALESCE({_mfg_x}, 'Unknown') AS manufacturer,
       SUM(oi.quantity_after_cancellations) AS volume_units,
+      {sv_units_col(store)},
       (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur) - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)) AS net_revenue_eur
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
@@ -2067,6 +2122,7 @@ def _render_sales_page(request: Request, store: str):
         "brands": {slug: {"name": get_display_name(slug), "hash": f"{BRAND_HASHES[slug]}-{slug}"}
                    for slug in MANUFACTURER_BQ_NAMES if slug not in DASHBOARD_ONLY_BRANDS},
         "fees": MANUFACTURER_FEES,
+        "sv_fee": {"rate": SUPER_VALUE_FEE_RATE, "overrides": SUPER_VALUE_FEE_OVERRIDES},
         "quarterly_targets": QUARTERLY_TARGETS,
         "store": store,
         "store_label": cfg["label"],
@@ -2393,6 +2449,13 @@ async def api_recon_combined(
             "revenue": r.get("fee_net_revenue_eur", 0),
             "rate": fee_info.get("rate", 0),
             "fee": r.get("fee_amount", 0),
+            # standard (brand deal) vs Super Value split
+            "std_units": r.get("std_fee_volume_g", 0),
+            "std_revenue": r.get("std_fee_net_revenue_eur", 0),
+            "std_fee": r.get("fee_std", 0),
+            "sv_units": r.get("sv_fee_volume_g", 0),
+            "sv_revenue": r.get("sv_fee_net_revenue_eur", 0),
+            "sv_fee": r.get("fee_sv", 0),
         })
 
     # Map breakdowns
@@ -2423,6 +2486,7 @@ async def api_recon_combined(
         key = slug or r["manufacturer"]  # group by slug if mapped, else by raw name
         if key in _mfr_merged:
             _mfr_merged[key]["volume_units"] += r.get("volume_units", 0) or 0
+            _mfr_merged[key]["sv_units"] += r.get("sv_units", 0) or 0
             _mfr_merged[key]["net_revenue_eur"] += r.get("net_revenue_eur", 0) or 0
         else:
             # Use the brand config display name if available, else the first BQ name seen
@@ -2431,6 +2495,7 @@ async def api_recon_combined(
                 "manufacturer": display_name,
                 "slug": slug,
                 "volume_units": r.get("volume_units", 0) or 0,
+                "sv_units": r.get("sv_units", 0) or 0,
                 "net_revenue_eur": r.get("net_revenue_eur", 0) or 0,
             }
 
@@ -2446,7 +2511,7 @@ async def api_recon_combined(
                 display_name = BRAND_CONFIG.get(ms_slug, {}).get("name", ms_slug)
                 _mfr_merged[ms_slug] = {
                     "manufacturer": display_name, "slug": ms_slug,
-                    "volume_units": 0, "net_revenue_eur": 0,
+                    "volume_units": 0, "sv_units": 0, "net_revenue_eur": 0,
                 }
             absorbed_mfrs = ms_cfg.get("manufacturers", [])
             # Build OR conditions for the extra (non-manufacturer-redirect) rules
@@ -2476,6 +2541,7 @@ async def api_recon_combined(
                 sup_sql = f"""
                 SELECT COALESCE(oi.product_manufacturer_name, 'Unknown') AS source_mfr,
                   SUM(oi.quantity_after_cancellations) AS volume_units,
+                  {sv_units_col(store)},
                   (SUM(oi.total_price_after_cancellations_and_discounts_including_vat_eur)
                    - COALESCE(SUM(oi.vat_amount_after_cancellations_eur),0)
                   ) AS net_revenue_eur
@@ -2491,15 +2557,18 @@ async def api_recon_combined(
                 ] + _dp
                 for sr in run_query(sup_sql, sup_params):
                     vol = sr.get("volume_units", 0) or 0
+                    svu = sr.get("sv_units", 0) or 0
                     rev = sr.get("net_revenue_eur", 0) or 0
                     # Add to composite row
                     _mfr_merged[ms_slug]["volume_units"] += vol
+                    _mfr_merged[ms_slug]["sv_units"] += svu
                     _mfr_merged[ms_slug]["net_revenue_eur"] += rev
                     # Subtract from source manufacturer row to avoid double-counting
                     src = sr["source_mfr"]
                     src_key = bq_to_slug.get(src, "") or src
                     if src_key in _mfr_merged and src_key != ms_slug:
                         _mfr_merged[src_key]["volume_units"] -= vol
+                        _mfr_merged[src_key]["sv_units"] -= svu
                         _mfr_merged[src_key]["net_revenue_eur"] -= rev
 
     mfr_out = list(_mfr_merged.values())
