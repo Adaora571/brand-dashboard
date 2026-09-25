@@ -738,14 +738,15 @@ SUPER_VALUE_EXCLUDE_EXPR = f"(NOT {SUPER_VALUE_FILTER_EXPR})"
 # SUPER_VALUE_FEE_OVERRIDES as {"<product name LIKE pattern>": rate}.
 SUPER_VALUE_FEE_RATE = 0.20
 SUPER_VALUE_FEE_OVERRIDES: dict[str, float] = {
-    # e.g. '%Triangle Mints%': 0.40,
+    # pattern is matched case-insensitively against the product name
+    '%upstate 24/1 rz%rozay%': 0.40,   # UPSTATE 24/1 RZ "Rozay" - per Adaora 2026-09-25 (not yet in stock)
 }
 
 def _sv_rate_sql() -> str:
     if not SUPER_VALUE_FEE_OVERRIDES:
         return str(SUPER_VALUE_FEE_RATE)
     whens = " ".join(
-        f"WHEN oi.product_name LIKE '{pat.replace(chr(39), chr(39)*2)}' THEN {float(rate)}"
+        f"WHEN LOWER(oi.product_name) LIKE LOWER('{pat.replace(chr(39), chr(39)*2)}') THEN {float(rate)}"
         for pat, rate in SUPER_VALUE_FEE_OVERRIDES.items())
     return f"(CASE {whens} ELSE {SUPER_VALUE_FEE_RATE} END)"
 
