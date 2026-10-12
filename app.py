@@ -1494,7 +1494,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         *comp_extra_p,
     ] + date_p
 
-    rows = run_query(sql, params)
+    rows = await run_query_async(sql, params)
     r = rows[0] if rows else {}
     fee = MANUFACTURER_FEES.get(slug, {})
     fee_amount, fee_std, fee_sv = calc_fee_split(fee, r)
@@ -1606,7 +1606,7 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
     GROUP BY period ORDER BY period
     """
     params = mfg_p + date_p
-    rows = run_query(sql, params)
+    rows = await run_query_async(sql, params)
 
     fee = MANUFACTURER_FEES.get(slug, {})
     for r in rows:
@@ -1710,7 +1710,7 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
     ORDER BY revenue_eur DESC
     """
     params = mfg_p + date_p + extra_params
-    rows = run_query(sql, params)
+    rows = await run_query_async(sql, params)
 
     # Infer brand name from product name when BQ brand & manufacturer are both empty
     _brand_prefixes = [
@@ -2021,7 +2021,7 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
     GROUP BY period ORDER BY period
     """
     params = mfg_p + date_p
-    result = {"data": run_query(sql, params)}
+    result = {"data": await run_query_async(sql, params)}
     cache_set(ck, result)
     return result
 
@@ -2047,6 +2047,10 @@ async def _get_categories(mfg_name: str, store: str = "nordleaf"):
     if _mfg_x != "oi.product_manufacturer_name":
         # apply manufacturer fallbacks to brand filters too
         mfg_where = mfg_where.replace("oi.product_manufacturer_name", _mfg_x)
+    ck = cache_key("categories", mfg=str(mfg_name), store=store)
+    cached = cache_get(ck)
+    if cached:
+        return cached
     sql = f"""
     SELECT DISTINCT ({CATEGORY_EXPR}) AS category
     FROM `{_DS}.order_items` oi
@@ -2055,8 +2059,10 @@ async def _get_categories(mfg_name: str, store: str = "nordleaf"):
       AND oi.product_vertical IS NOT NULL
     ORDER BY 1
     """
-    rows = run_query(sql, mfg_p)
-    return {"categories": [r["category"] for r in rows]}
+    rows = await run_query_async(sql, mfg_p)
+    result = {"categories": [r["category"] for r in rows]}
+    cache_set(ck, result)
+    return result
 
 
 @app.get("/api/brand/{hashed_slug}/categories")
@@ -2109,7 +2115,7 @@ async def _get_platform_total_rx(start_date: str = "", end_date: str = "", categ
         bigquery.ScalarQueryParameter("end", "DATE", e),
     ] + time_p + cat_p + pl_p
 
-    rows = run_query(sql, params)
+    rows = await run_query_async(sql, params)
     result = rows[0].get("total_rx", 0) if rows else 0
     cache_set(ck, result)
     return result
@@ -2208,7 +2214,7 @@ async def api_recon_manufacturers(request: Request, store: str = "nordleaf"):
       {shop}
     ORDER BY 1
     """
-    rows = run_query(sql, [])
+    rows = await run_query_async(sql, [])
     result = {"manufacturers": [r["name"] for r in rows]}
     cache_set(ck, result)
     return result
@@ -2234,9 +2240,9 @@ async def api_recon_journeys(request: Request, store: str = "prio-one"):
     FROM `{src}.collections`
     QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1
     """
-    rows = run_query(sql, [])
+    rows = await run_query_async(sql, [])
     member_sql = f"SELECT DISTINCT CAST(collection_id AS STRING) AS cid FROM `{src}.collects`"
-    member_ids = {r["cid"] for r in run_query(member_sql, [])}
+    member_ids = {r["cid"] for r in await run_query_async(member_sql, [])}
     smart_specs = _smart_collection_specs(store)
     journeys = []
     for r in rows:
@@ -2564,7 +2570,7 @@ async def api_recon_combined(
                 sup_params = extra_params + [
                     bigquery.ArrayQueryParameter("absorbed", "STRING", absorbed_mfrs),
                 ] + _dp
-                for sr in run_query(sup_sql, sup_params):
+                for sr in await run_query_async(sup_sql, sup_params):
                     vol = sr.get("volume_units", 0) or 0
                     svu = sr.get("sv_units", 0) or 0
                     rev = sr.get("net_revenue_eur", 0) or 0
@@ -2939,7 +2945,7 @@ async def data_freshness():
     FROM `{_DS}.orders` o
     WHERE DATE(o.created_at) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
     """
-    rows = run_query(sql, [])
+    rows = await run_query_async(sql, [])
     r = rows[0] if rows else {}
     return {
         "latest_order_date": str(r.get("latest_order_date", "unknown")),
@@ -2988,6 +2994,37 @@ async def _warm_default_views():
         except Exception as exc:
             logger.warning("cache warm request failed: %s (%s)", u, exc)
     logger.info("cache warm cycle done (%d views)", len(urls))
+    await _warm_brand_dashboards()
+
+
+def _brand_default_range() -> tuple[str, str, str, str]:
+    """Default view of dashboard.html: quarter-to-date, compared with the
+    same-length window right before it (getCompareDates 'prev')."""
+    today = datetime.now(BERLIN_TZ).date()
+    qstart = date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
+    span = (today - qstart).days
+    return str(qstart), str(today), str(qstart - timedelta(days=span + 1)), str(qstart - timedelta(days=1))
+
+
+async def _warm_brand_dashboards():
+    """Pre-compute each manufacturer dashboard's default view after every DWH
+    refresh, so the first visitor gets a cached page instead of a cold load."""
+    s, e, cs, ce = _brand_default_range()
+    n = 0
+    for slug, mfg_name in MANUFACTURER_BQ_NAMES.items():
+        try:
+            await asyncio.gather(
+                _get_summary(mfg_name, slug, s, e, "", cs, ce, ""),
+                _get_trends(mfg_name, slug, s, e, "", ""),
+                _get_products(mfg_name, slug, s, e, "", "", "", "", ""),
+                _get_breakdowns(mfg_name, slug, s, e, "", ""),
+                _get_patients(mfg_name, slug, s, e, "", ""),
+                _get_categories(mfg_name),
+            )
+            n += 1
+        except Exception as exc:
+            logger.warning("brand cache warm failed for %s: %s", slug, exc)
+    logger.info("brand cache warm done (%d brands, %s..%s)", n, s, e)
 
 
 async def _cache_warm_loop():
