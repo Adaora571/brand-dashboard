@@ -699,26 +699,19 @@ _fee_cat_list = ", ".join(f"'{c}'" for c in FEE_ELIGIBLE_CATEGORIES)
 FEE_CAT_FILTER = f"({CATEGORY_EXPR}) IN ({_fee_cat_list})"
 
 # ── "Super Value" collection filter ──────────────────────────
-# Mirrors the Shopify smart collection "Blüten für unter 4 €"
-# (id 698133348687): ACTIVE flower products with a variant priced
-# between €2 and €4 (exclusive), excluding "Rezept" items.
-# Membership is resolved live from the Shopify source tables (latest
-# sync snapshot per product/variant), so the filter stays in sync with
-# the shop when prices or the assortment change. Matching is by
-# product_id (rename-proof), with the datamart's 'flower' vertical as
-# the flower condition.
+# Super Value = a FLOWER line sold at €2.00–€3.99 per unit (gram), judged by
+# the price on the order line itself (unit price before discounts, incl.
+# VAT) — i.e. the price the patient actually paid at the time of sale.
+#
+# Until 2026-10-12 membership came from the product's CURRENT Shopify price,
+# which back-dated every price change: UPSTATE 24/1 RZ "Rozay" sold at €5.49
+# all September, dropped to €3.99 around 9 Oct, and its September grams were
+# then counted (and invoiced) as Super Value. Using the order-line price keeps
+# history fixed: a product counts as SV only for the sales made at SV prices,
+# and keeps its SV history if it later leaves the SV range.
 _SOURCE_SHOPIFY_DATASET = PROJECT_DATASET.split(".")[0] + ".source_shopify"
-SUPER_VALUE_IDS_SQL = f"""
-      SELECT DISTINCT CAST(p.id AS STRING)
-      FROM (SELECT * FROM `{_SOURCE_SHOPIFY_DATASET}.products`
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) p
-      JOIN (SELECT * FROM `{_SOURCE_SHOPIFY_DATASET}.product_variants`
-            QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY updated_at DESC) = 1) v
-        ON v.product_id = p.id
-      WHERE UPPER(p.status) = 'ACTIVE'
-        AND SAFE_CAST(v.price AS FLOAT64) > 2
-        AND SAFE_CAST(v.price AS FLOAT64) < 4
-        AND p.title NOT LIKE '%Rezept%'"""
+SUPER_VALUE_MIN_PRICE = 2.00
+SUPER_VALUE_MAX_PRICE = 3.99
 
 # Internal tokens used on the wire: the recon frontend sends
 # collection=super-value (or excl-super-value), which is folded into the
@@ -727,7 +720,8 @@ SUPER_VALUE_IDS_SQL = f"""
 SUPER_VALUE_TOKEN = "__super_value__"
 SUPER_VALUE_EXCL_TOKEN = "__excl_super_value__"
 SUPER_VALUE_FILTER_EXPR = (
-    f"(({CATEGORY_EXPR}) = 'flower' AND oi.product_id IN ({SUPER_VALUE_IDS_SQL}))"
+    f"(({CATEGORY_EXPR}) = 'flower' AND COALESCE(oi.unit_price_before_discounts_including_vat_eur, 0) "
+    f"BETWEEN {SUPER_VALUE_MIN_PRICE} AND {SUPER_VALUE_MAX_PRICE})"
 )
 SUPER_VALUE_EXCLUDE_EXPR = f"(NOT {SUPER_VALUE_FILTER_EXPR})"
 
