@@ -270,6 +270,12 @@
       <option value="">All Categories</option>
     </select>
 
+    <select id="globalCollection" onchange="loadAll()" title="Super Value = the 'Blüten für unter 4 €' flowers" style="background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.22);border-radius:10px;padding:9px 16px;font-size:12px;font-family:inherit;outline:none;appearance:none;-webkit-appearance:none;cursor:pointer;min-width:140px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);box-shadow:0 2px 8px rgba(0,0,0,0.12),inset 0 1px 0 rgba(255,255,255,0.15);font-weight:500;">
+      <option value="">All Collections</option>
+      <option value="super-value">Super Value</option>
+      <option value="excl-super-value">All except Super Value</option>
+    </select>
+
     <button class="btn-freq active" data-freq="monthly" onclick="setFreq(this)">Monthly</button>
     <button class="btn-freq" data-freq="weekly" onclick="setFreq(this)">Weekly</button>
     <button class="btn-freq" data-freq="daily" onclick="setFreq(this)">Daily</button>
@@ -500,9 +506,11 @@ async function apiFetch(endpoint, extraParams = '') {
   const ce = document.getElementById('compareEnd').value;
   const cat = document.getElementById('globalCategory').value;
   const catParam = cat ? `&category=${encodeURIComponent(cat)}` : '';
+  const coll = document.getElementById('globalCollection')?.value || '';
+  const collParam = coll ? `&collection=${encodeURIComponent(coll)}` : '';
   const cmpParam = (cs && ce) ? `&compare_start=${cs}&compare_end=${ce}` : '';
   const plParam = selectedProductLine ? `&product_line=${encodeURIComponent(selectedProductLine)}` : '';
-  const url = `${API}/${endpoint}?start_date=${s}&end_date=${e}&freq=${currentFreq}${catParam}${cmpParam}${plParam}${extraParams}`;
+  const url = `${API}/${endpoint}?start_date=${s}&end_date=${e}&freq=${currentFreq}${catParam}${collParam}${cmpParam}${plParam}${extraParams}`;
   const res = await fetch(url, { credentials: 'same-origin' });
   if (res.status === 403) { window.location.href = `/brand/${SLUG}`; return; }
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -528,6 +536,8 @@ function getEffectiveCategory() {
   // If user explicitly selected a category, use it
   const selected = (document.getElementById('globalCategory')?.value || '').toLowerCase();
   if (selected) return selected;
+  // Super Value is flowers only, so it reads in grams
+  if ((document.getElementById('globalCollection')?.value || '') === 'super-value') return 'flower';
   // Smart detection: if only one category exists, treat as if it's selected
   if (availableCategories.length === 1) return availableCategories[0].toLowerCase();
   return '';  // truly mixed / multiple categories

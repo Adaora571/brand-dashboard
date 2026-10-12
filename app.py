@@ -731,6 +731,17 @@ SUPER_VALUE_FILTER_EXPR = (
 )
 SUPER_VALUE_EXCLUDE_EXPR = f"(NOT {SUPER_VALUE_FILTER_EXPR})"
 
+
+def fold_collection(category: str, collection: str) -> str:
+    """Fold a collection choice (super-value / excl-super-value) into the
+    category parameter as a token, so every query helper applies it.
+    Used by both the sales (recon) API and the brand dashboard API."""
+    if collection in ("super-value", "super_value"):
+        return f"{category},{SUPER_VALUE_TOKEN}" if category else SUPER_VALUE_TOKEN
+    if collection in ("excl-super-value", "exclude-super-value", "excl_super_value"):
+        return f"{category},{SUPER_VALUE_EXCL_TOKEN}" if category else SUPER_VALUE_EXCL_TOKEN
+    return category
+
 # ── Super Value fee (reconciliation) ─────────────────────────
 # Super Value flowers carry their own per-gram fee for EVERY brand,
 # replacing the brand's normal deal (incl. percentage deals) on those grams.
@@ -1550,10 +1561,11 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
 async def api_summary(
     request: Request, hashed_slug: str, start_date: str = "", end_date: str = "",
     category: str = "", compare_start: str = "", compare_end: str = "",
-    product_line: str = "",
+    product_line: str = "", collection: str = "",
 ):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    category = fold_collection(category, collection)
     return await _get_summary(mfg_name, slug, start_date, end_date, category, compare_start, compare_end, product_line)
 
 
@@ -1612,9 +1624,10 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
 
 
 @app.get("/api/brand/{hashed_slug}/trends")
-async def api_trends(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
+async def api_trends(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = "", collection: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    category = fold_collection(category, collection)
     return await _get_trends(mfg_name, slug, start_date, end_date, category, product_line)
 
 
@@ -1737,10 +1750,11 @@ async def _get_products(mfg_name: str, slug: str, start_date: str = "", end_date
 async def api_products(
     request: Request, hashed_slug: str, start_date: str = "", end_date: str = "",
     region: str = "", brand: str = "", category: str = "", origin: str = "",
-    product_line: str = "",
+    product_line: str = "", collection: str = "",
 ):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    category = fold_collection(category, collection)
     return await _get_products(mfg_name, slug, start_date, end_date, region, brand, category, origin, product_line)
 
 
@@ -1852,9 +1866,10 @@ async def _get_breakdowns(mfg_name: str, slug: str, start_date: str = "", end_da
 
 
 @app.get("/api/brand/{hashed_slug}/breakdowns")
-async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
+async def api_breakdowns(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = "", collection: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    category = fold_collection(category, collection)
     return await _get_breakdowns(mfg_name, slug, start_date, end_date, category, product_line)
 
 
@@ -1971,9 +1986,10 @@ async def _get_patients(mfg_name: str, slug: str, start_date: str = "", end_date
 
 
 @app.get("/api/brand/{hashed_slug}/patients")
-async def api_patients(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
+async def api_patients(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = "", collection: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    category = fold_collection(category, collection)
     return await _get_patients(mfg_name, slug, start_date, end_date, category, product_line)
 
 
@@ -2017,9 +2033,10 @@ async def _get_pricing(mfg_name: str, slug: str, start_date: str = "", end_date:
 
 
 @app.get("/api/brand/{hashed_slug}/pricing")
-async def api_pricing(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = ""):
+async def api_pricing(request: Request, hashed_slug: str, start_date: str = "", end_date: str = "", category: str = "", product_line: str = "", collection: str = ""):
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
+    category = fold_collection(category, collection)
     return await _get_pricing(mfg_name, slug, start_date, end_date, category, product_line)
 
 
@@ -2294,10 +2311,7 @@ async def api_recon_combined(
 
     # Fold the collection filter into the category pipeline so every
     # KPI, chart and table picks it up without further plumbing.
-    if collection in ("super-value", "super_value"):
-        category = f"{category},{SUPER_VALUE_TOKEN}" if category else SUPER_VALUE_TOKEN
-    elif collection in ("excl-super-value", "exclude-super-value", "excl_super_value"):
-        category = f"{category},{SUPER_VALUE_EXCL_TOKEN}" if category else SUPER_VALUE_EXCL_TOKEN
+    category = fold_collection(category, collection)
 
     # Journeys filter (Prio One): fold into the category pipeline as a token,
     # same mechanism as the collection filter.
