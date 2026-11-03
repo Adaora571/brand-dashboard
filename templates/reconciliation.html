@@ -1307,7 +1307,7 @@ function renderFees() {
 
   const kg = g => (Number(g || 0) / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' kg';
   const alwNote = (allData.fee_allowances || []).map(a =>
-    `${a.name}: ${kg(a.free_kg * 1000)} free bundle — ${kg(a.used_before_g)} used before this period, `
+    `${a.name}: ${kg(a.free_kg * 1000)} free bundle${a.gates_all ? ' (no kickback on any product while it lasts)' : ''} — ${kg(a.used_before_g)} used before this period, `
     + `${kg(a.period_g)} in period (${kg(a.free_g)} free, ${kg(a.billable_g)} billed), ${kg(a.remaining_g)} remaining.`).join(' ');
   document.getElementById('feeNote').textContent = (FEATURES.collections
     ? 'Fee base = flowers & extracts. Super Value flowers pay ' + svRate + ' (replacing the brand deal on those grams'
