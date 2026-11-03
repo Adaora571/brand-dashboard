@@ -1280,20 +1280,23 @@ function renderFees() {
   let head = '<tr><th rowspan="2" style="vertical-align:bottom;">Period</th>';
   if (showStd) head += g(split ? 'Standard (excl. Super Value)' : 'Excl. Super Value', stdRate);
   if (showSV)  head += g('Super Value', svRate);
-  if (split)   head += '<th class="r" rowspan="2" style="vertical-align:bottom;">Total Fee</th>';
+  const fixed = !!feeInfo.fixed_monthly;
+  if (split)   head += `<th class="r" rowspan="2" style="vertical-align:bottom;">${fixed ? 'Calculated Fee' : 'Total Fee'}</th>`;
+  if (fixed)   head += `<th class="r" rowspan="2" style="vertical-align:bottom;">Fixed Fee<br><span style="font-weight:500;text-transform:none;">€${Number(feeInfo.fixed_monthly).toLocaleString()} / month</span></th>`;
   head += '</tr><tr>' + (showStd ? sub : '') + (showSV ? sub : '') + '</tr>';
   document.getElementById('feeHead').innerHTML = head;
 
-  const t = { su:0, sr:0, sf:0, vu:0, vr:0, vf:0 };
+  const t = { su:0, sr:0, sf:0, vu:0, vr:0, vf:0, fx:0 };
   let body = '';
   currentFees.forEach(row => {
     const su = row.std_units ?? row.units ?? 0, sr = row.std_revenue ?? row.revenue ?? 0, sf = row.std_fee ?? row.fee ?? 0;
-    const vu = row.sv_units || 0, vr = row.sv_revenue || 0, vf = row.sv_fee || 0;
-    t.su += su; t.sr += sr; t.sf += sf; t.vu += vu; t.vr += vr; t.vf += vf;
+    const vu = row.sv_units || 0, vr = row.sv_revenue || 0, vf = row.sv_fee || 0, fx = row.fee_fixed || 0;
+    t.su += su; t.sr += sr; t.sf += sf; t.vu += vu; t.vr += vr; t.vf += vf; t.fx += fx;
     body += `<tr><td>${row.period || '—'}</td>`;
     if (showStd) body += `<td class="r">${formatNum(su)}</td><td class="r">${formatCurr(sr)}</td><td class="r">${formatCurr(sf)}</td>`;
     if (showSV)  body += `<td class="r">${formatNum(vu)}</td><td class="r">${formatCurr(vr)}</td><td class="r">${formatCurr(vf)}</td>`;
-    if (split)   body += `<td class="r" style="font-weight:600;">${formatCurr(sf + vf)}</td>`;
+    if (split)   body += `<td class="r" style="font-weight:${fixed ? 400 : 600};">${formatCurr(sf + vf)}</td>`;
+    if (fixed)   body += `<td class="r" style="font-weight:600;">${formatCurr(fx)}</td>`;
     body += '</tr>';
   });
   document.getElementById('feeBody').innerHTML = body;
@@ -1301,7 +1304,8 @@ function renderFees() {
   let foot = '<tr><td style="font-weight:700;">Total</td>';
   if (showStd) foot += `<td class="r">${formatNum(t.su)}</td><td class="r">${formatCurr(t.sr)}</td><td class="r" style="color:#92400e;">${formatCurr(t.sf)}</td>`;
   if (showSV)  foot += `<td class="r">${formatNum(t.vu)}</td><td class="r">${formatCurr(t.vr)}</td><td class="r" style="color:#92400e;">${formatCurr(t.vf)}</td>`;
-  if (split)   foot += `<td class="r" style="color:#92400e;" id="feeTotalAmt">${formatCurr(t.sf + t.vf)}</td>`;
+  if (split)   foot += `<td class="r" style="color:#92400e;" ${fixed ? '' : 'id="feeTotalAmt"'}>${formatCurr(t.sf + t.vf)}</td>`;
+  if (fixed)   foot += `<td class="r" style="color:#92400e;font-weight:700;" id="feeTotalAmt">${formatCurr(t.fx)}</td>`;
   foot += '</tr>';
   document.getElementById('feeFoot').innerHTML = foot;
 
@@ -1309,7 +1313,8 @@ function renderFees() {
   const alwNote = (allData.fee_allowances || []).map(a =>
     `${a.name}: ${kg(a.free_kg * 1000)} free bundle${a.gates_all ? ' (no kickback on any product while it lasts)' : ''} — ${kg(a.used_before_g)} used before this period, `
     + `${kg(a.period_g)} in period (${kg(a.free_g)} free, ${kg(a.billable_g)} billed), ${kg(a.remaining_g)} remaining.`).join(' ');
-  document.getElementById('feeNote').textContent = (FEATURES.collections
+  const fixedNote = fixed ? ` ${feeInfo.label || 'Fixed fee'}: the fixed amount is the fee (pro-rated by days for partial months); Standard and Super Value are calculated for comparison only.` : '';
+  document.getElementById('feeNote').textContent = fixedNote + (FEATURES.collections
     ? 'Fee base = flowers & extracts. Super Value flowers pay ' + svRate + ' (replacing the brand deal on those grams'
       + (hasOverrides ? '; a few products carry a different SV rate).' : ').')
     : '') + (alwNote ? ' Free allowance — ' + alwNote : '')
@@ -1426,6 +1431,7 @@ function renderFeeChart() {
   const ds = [];
   if (showStd) ds.push({ label: showSV ? 'Standard' : 'Fee', data: fees.map(x => x.std_fee ?? x.fee), backgroundColor: COLORS.orange, stack: 'fee' });
   if (showSV)  ds.push({ label: 'Super Value', data: fees.map(x => x.sv_fee || 0), backgroundColor: '#fbbf24', stack: 'fee' });
+  if (fees.some(x => x.fee_fixed != null)) ds.push({ label: 'Fixed fee', data: fees.map(x => x.fee_fixed || 0), backgroundColor: '#94a3b8', stack: 'fixed' });
   charts.fee = new Chart(ctx, {
     type: 'bar',
     data: { labels: fees.map(x => x.period), datasets: ds },

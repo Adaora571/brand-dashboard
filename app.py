@@ -495,9 +495,10 @@ MANUFACTURER_FEES = {
     },
     "four20": {
         "type": "per_gram", "rate": 0.40,
-        "label": "€0.40 / g", "desc": "Per-gram transaction fee",
+        "fixed_monthly": 44000,
+        "label": "€44,000 / month (fixed)", "desc": "Fixed €44,000 per month; the per-gram fee (€0.40/g, Super Value €0.20/g or the product's own kickback) is still calculated for comparison",
         "effective_date": "2025-01-01",
-        "notes": "Review scheduled Jul 2026",
+        "notes": "Fixed monthly amount per Adaora 2026-11-03 (= €132k/quarter in the Q4 Super Value sheet). Calculated fee shown alongside, never invoiced.",
     },
     "aurora": {
         "type": "per_gram", "rate": 0.90,
@@ -507,9 +508,10 @@ MANUFACTURER_FEES = {
     },
     "demecan": {
         "type": "per_gram", "rate": 0.83,
-        "label": "€0.83 / g", "desc": "Per-gram fee on flowers & extracts (Super Value flowers: separate SV rate)",
+        "fixed_monthly": 50000,
+        "label": "€50,000 / month (fixed)", "desc": "Fixed €50,000 per month; the per-gram fee (€0.83/g on flowers & extracts, Super Value €0.20/g or the product's own kickback) is still calculated for comparison",
         "effective_date": "2024-03-01",
-        "notes": "",
+        "notes": "Fixed monthly amount per Adaora 2026-11-03 (= €150k/quarter in the Q4 Super Value sheet). Calculated fee shown alongside, never invoiced.",
     },
     "enua": {
         "type": "per_gram", "rate": 0.50,
@@ -915,6 +917,42 @@ def calc_fee_split(fee_info: dict, r: dict) -> tuple[float, float, float]:
 #   scope_sql : SQL predicate on oi.* selecting the bucket's products
 #   "rest"    : every fee-eligible gram not claimed by an earlier bucket
 #   from_date : only grams sold on/after this date count (default: all)
+
+# ── Fixed monthly fees (Four 20, Demecan) ───────────────────
+# Some brands pay a fixed amount per month whatever the volume. The
+# per-gram fee is still CALCULATED like for every other brand (so the two
+# can be compared), but the fixed amount is what counts as the fee. A
+# partial month (e.g. month-to-date) carries the fixed amount pro-rata by
+# calendar days.
+def _month_fraction(period: str, start_date: str, end_date: str) -> float:
+    """Share of calendar month `period` (YYYY-MM) covered by [start, end]."""
+    y, m = int(period[:4]), int(period[5:7])
+    first = date(y, m, 1)
+    last = (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
+    lo = max(first, date.fromisoformat(start_date)) if start_date else first
+    hi = min(last, date.fromisoformat(end_date)) if end_date else last
+    if hi < lo:
+        return 0.0
+    return ((hi - lo).days + 1) / ((last - first).days + 1)
+
+
+def _months_between(start_date: str, end_date: str) -> list:
+    s = date.fromisoformat(start_date) if start_date else date(2020, 1, 1)
+    e = date.fromisoformat(end_date) if end_date else datetime.now(BERLIN_TZ).date()
+    out, y, m = [], s.year, s.month
+    while (y, m) <= (e.year, e.month):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def fixed_fee_total(fee_info: dict, start_date: str, end_date: str) -> float | None:
+    fixed = (fee_info or {}).get("fixed_monthly")
+    if not fixed:
+        return None
+    return sum(float(fixed) * _month_fraction(p, start_date, end_date)
+               for p in _months_between(start_date, end_date))
+
 
 def _allowances(fee_info: dict) -> list:
     return list((fee_info or {}).get("allowances") or [])
@@ -1763,6 +1801,10 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         fee_amount, fee_std, fee_sv, alw_detail = apply_allowances(fee, r, used)
     else:
         fee_amount, fee_std, fee_sv = calc_fee_split(fee, r)
+    fee_calc = fee_amount
+    fee_fixed = fixed_fee_total(fee, start_date, end_date)
+    if fee_fixed is not None:
+        fee_amount = fee_fixed
 
     def safe_growth(curr, prev):
         if curr is None or prev is None or prev == 0:
@@ -1809,6 +1851,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "repeat_purchase_rate": safe_growth(r.get("repeat_purchase_rate"), r.get("prev_repeat_rate")),
         },
         "fee": {"amount": fee_amount, "standard": fee_std, "super_value": fee_sv,
+                "calculated": fee_calc, "fixed": fee_fixed, "fixed_monthly": fee.get("fixed_monthly"),
                 "std_volume_g": r.get("std_fee_volume_g", 0), "sv_volume_g": r.get("sv_fee_volume_g", 0),
                 "allowances": alw_detail},
         "comp": _comp_info,
@@ -1888,6 +1931,11 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
     else:
         for r in rows:
             r["fee_amount"], r["fee_std"], r["fee_sv"] = calc_fee_split(fee, r)
+    for r in rows:
+        r["fee_calc"] = r["fee_amount"]
+        if fee.get("fixed_monthly"):
+            r["fee_fixed"] = float(fee["fixed_monthly"]) * _month_fraction(r["period"], start_date, end_date)
+            r["fee_amount"] = r["fee_fixed"]
 
     result = {"data": rows}
     cache_set(ck, result)
@@ -2709,6 +2757,8 @@ async def api_recon_combined(
         "net_revenue": cur.get("net_revenue_eur"),
         "net_sales_fee": cur.get("net_sales_fee_eur"),
         "total_fee": fee_amt,
+        "fee_calc": summary.get("fee", {}).get("calculated", fee_amt),
+        "fee_fixed": summary.get("fee", {}).get("fixed"),
         "ppo": cur.get("avg_products_per_order"),
         "epg": cur.get("avg_eur_per_g"),
         "aov": cur.get("avg_order_value"),
@@ -2760,6 +2810,8 @@ async def api_recon_combined(
             "sv_units": r.get("sv_fee_volume_g", 0),
             "sv_revenue": r.get("sv_fee_net_revenue_eur", 0),
             "sv_fee": r.get("fee_sv", 0),
+            "fee_calc": r.get("fee_calc", r.get("fee_amount", 0)),
+            "fee_fixed": r.get("fee_fixed"),
             "allowances": r.get("allowances", []),
         })
 
