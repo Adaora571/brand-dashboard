@@ -62,7 +62,9 @@ def _next_refresh_dt() -> datetime:
 def cache_key(endpoint: str, **kwargs) -> str:
     """Build a deterministic cache key from endpoint + params."""
     parts = sorted(f"{k}={v}" for k, v in kwargs.items() if v)
-    return f"{endpoint}|{'|'.join(parts)}"
+    # Product kickbacks come from the procurement portal; a new set of terms
+    # must not be served from results cached under the old one.
+    return f"{endpoint}|pv={_portal_terms['version']}|{'|'.join(parts)}"
 
 
 def cache_get(key: str):
@@ -757,13 +759,92 @@ SUPER_VALUE_FEE_OVERRIDES: dict[str, float] = {
     '%upstate 24/1 rz%rozay%': 0.40,   # UPSTATE 24/1 RZ "Rozay" - per Adaora 2026-09-25 (not yet in stock)
 }
 
+# ── Product kickbacks from the procurement portal ────────────
+# The BRAND rules live here (MANUFACTURER_FEES); the PRODUCT exceptions - a
+# product whose kickback differs from the standard, e.g. Rozay €0.40/g - are
+# entered in the procurement portal (product page → deal) and read from its
+# read-only API (GET /api/v1/deal-terms) at every DWH refresh. Per Adaora
+# (2026-11-03) a product kickback applies to that product's SUPER VALUE grams
+# only (replacing the €0.20 SV rate from the deal's start date); its grams
+# at normal prices keep following the brand deal. If the portal cannot be
+# reached the last successfully fetched terms stay in force; before the
+# first successful fetch SUPER_VALUE_FEE_OVERRIDES (below) is the fallback.
+PORTAL_URL = os.getenv("PORTAL_URL", "https://portal.nordleaf.de").rstrip("/")
+PORTAL_API_KEY = os.getenv("PORTAL_API_KEY", "")
+_portal_terms: dict = {"rules": None, "version": 0, "fetched_at": None, "ok": False,
+                       "count": 0, "error": "", "standard_sv": None}
+
+
+def _rules_from_portal(items: list) -> list:
+    """Portal deal-terms items → [{name, rate, from, to, ref}] - one rule per
+    history segment that carries a kickback of its own (a blank kickback in a
+    segment means 'back to the standard' and needs no rule)."""
+    rules = []
+    for it in items or []:
+        name = (it.get("name") or "").strip()
+        if not name:
+            continue
+        hist = it.get("history") or []
+        if not hist and it.get("kickback") is not None:
+            hist = [{"start": it.get("from"), "kickback": it.get("kickback"), "ref": it.get("ref")}]
+        hist = sorted(hist, key=lambda h: (h.get("start") is not None, h.get("start") or ""))
+        for i, h in enumerate(hist):
+            rate = h.get("kickback")
+            if rate is None:
+                continue
+            nxt = hist[i + 1]["start"] if i + 1 < len(hist) else None
+            rules.append({"name": name, "rate": float(rate), "from": h.get("start"),
+                          "to": nxt, "ref": h.get("ref") or ""})
+    return rules
+
+
+def refresh_portal_terms() -> None:
+    """Fetch the product deal terms from the portal (sync; run in a thread)."""
+    if not PORTAL_API_KEY:
+        _portal_terms["error"] = "PORTAL_API_KEY not set"
+        return
+    import requests as _rq
+    try:
+        resp = _rq.get(f"{PORTAL_URL}/api/v1/deal-terms",
+                       headers={"X-API-Key": PORTAL_API_KEY}, timeout=20)
+        resp.raise_for_status()
+        body = resp.json()
+        rules = _rules_from_portal(body.get("items", []))
+        if rules != _portal_terms["rules"]:
+            _portal_terms["version"] += 1
+        _portal_terms.update(rules=rules, ok=True, error="", count=len(rules),
+                             fetched_at=datetime.now(BERLIN_TZ).strftime("%Y-%m-%d %H:%M"),
+                             standard_sv=body.get("standard_supervalue_kickback"))
+        logger.info("portal deal terms: %d product rules (v%d)", len(rules), _portal_terms["version"])
+    except Exception as exc:
+        _portal_terms["error"] = str(exc)[:200]
+        logger.warning("portal deal terms fetch failed: %s", exc)
+
+
+def _sql_str(x: str) -> str:
+    return x.replace("\\", "\\\\").replace("'", "''")
+
+
 def _sv_rate_sql() -> str:
-    if not SUPER_VALUE_FEE_OVERRIDES:
+    """SQL for the Super Value €/g rate of an order line: the portal's
+    product kickback where one applies on that order's date, else the
+    standard SV rate."""
+    rules = _portal_terms["rules"]
+    whens = []
+    if rules is None:
+        for pat, rate in SUPER_VALUE_FEE_OVERRIDES.items():
+            whens.append(f"WHEN LOWER(oi.product_name) LIKE LOWER('{_sql_str(pat)}') THEN {float(rate)}")
+    else:
+        for ru in rules:
+            cond = f"LOWER(oi.product_name) LIKE LOWER('{_sql_str(ru['name'])}%')"
+            if ru.get("from"):
+                cond += f" AND DATE(o.created_at, 'Europe/Berlin') >= DATE('{ru['from']}')"
+            if ru.get("to"):
+                cond += f" AND DATE(o.created_at, 'Europe/Berlin') < DATE('{ru['to']}')"
+            whens.append(f"WHEN {cond} THEN {ru['rate']}")
+    if not whens:
         return str(SUPER_VALUE_FEE_RATE)
-    whens = " ".join(
-        f"WHEN LOWER(oi.product_name) LIKE LOWER('{pat.replace(chr(39), chr(39)*2)}') THEN {float(rate)}"
-        for pat, rate in SUPER_VALUE_FEE_OVERRIDES.items())
-    return f"(CASE {whens} ELSE {SUPER_VALUE_FEE_RATE} END)"
+    return f"(CASE {' '.join(whens)} ELSE {SUPER_VALUE_FEE_RATE} END)"
 
 
 def _std_rate_sql(fee_info: dict) -> str:
@@ -2332,7 +2413,8 @@ def _render_sales_page(request: Request, store: str):
         "brands": {slug: {"name": get_display_name(slug), "hash": f"{BRAND_HASHES[slug]}-{slug}"}
                    for slug in MANUFACTURER_BQ_NAMES if slug not in DASHBOARD_ONLY_BRANDS},
         "fees": MANUFACTURER_FEES,
-        "sv_fee": {"rate": SUPER_VALUE_FEE_RATE, "overrides": SUPER_VALUE_FEE_OVERRIDES},
+        "sv_fee": {"rate": SUPER_VALUE_FEE_RATE, "overrides": SUPER_VALUE_FEE_OVERRIDES,
+                   "portal": {k: _portal_terms[k] for k in ("ok", "count", "fetched_at", "error")}},
         "quarterly_targets": QUARTERLY_TARGETS,
         "store": store,
         "store_label": cfg["label"],
@@ -2383,6 +2465,17 @@ async def recon_logout(request: Request):
 # ============================================================
 # SALES DASHBOARD — store metadata endpoints
 # ============================================================
+@app.get("/api/recon/meta/portal-terms")
+async def api_recon_portal_terms(request: Request, refresh: int = 0):
+    """Product kickback rules currently overlaid from the procurement portal
+    (sales dashboard only). ?refresh=1 re-fetches them now."""
+    if not _recon_authed(request):
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    if refresh:
+        await asyncio.to_thread(refresh_portal_terms)
+    return {**_portal_terms, "portal_url": PORTAL_URL, "key_set": bool(PORTAL_API_KEY)}
+
+
 @app.get("/api/recon/meta/manufacturers")
 async def api_recon_manufacturers(request: Request, store: str = "nordleaf"):
     """Distinct manufacturer names present in a store's data (for stores
@@ -3168,6 +3261,7 @@ def _default_range() -> tuple[str, str, str, str]:
 
 
 async def _warm_default_views():
+    await asyncio.to_thread(refresh_portal_terms)
     import requests as _rq
     port = os.environ.get("PORT", "10000")
     base = f"http://127.0.0.1:{port}"

@@ -1312,7 +1312,9 @@ function renderFees() {
   document.getElementById('feeNote').textContent = (FEATURES.collections
     ? 'Fee base = flowers & extracts. Super Value flowers pay ' + svRate + ' (replacing the brand deal on those grams'
       + (hasOverrides ? '; a few products carry a different SV rate).' : ').')
-    : '') + (alwNote ? ' Free allowance — ' + alwNote : '');
+    : '') + (alwNote ? ' Free allowance — ' + alwNote : '')
+    + (SV_FEE?.portal?.ok ? ` Product kickbacks from the procurement portal: ${SV_FEE.portal.count} rule(s), as of ${SV_FEE.portal.fetched_at}.`
+       : (SV_FEE?.portal?.error ? ' Product kickbacks: portal not reachable (' + SV_FEE.portal.error + ') — last known terms in use.' : ''));
 }
 
 function renderCharts() {
