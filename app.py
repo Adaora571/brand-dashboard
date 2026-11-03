@@ -528,12 +528,19 @@ MANUFACTURER_FEES = {
         "notes": "",
     },
     "sanitygroup": {
-        "type": "per_gram", "rate": 0.30,
-        "label": "1,150 kg free → €0.30/g", "desc": "1,150 kg one-time free (800+350), then €0.30/g (2026); €0.40/g from 2027",
+        "type": "per_gram", "rate": 0.40,
+        "label": "1,150 kg free → €0.40/g", "desc": "1,150 kg one-time free (800+350, from Apr 2026), then €0.40/g; Coffee Cake: own 50 kg free, then €0.40/g",
         "effective_date": "2026-04-01",
-        "notes": "Replaces advance deal from Apr 2026. 1,150 kg one-time free (800 original + 350 additional), then €0.30/g rest of 2026, €0.40/g from Jan 2027.",
-        "free_kg": 1150,
-        "rate_2027": 0.40,
+        "notes": "Replaces advance deal from Apr 2026. 1,150 kg one-time free (800 original + 350 additional) on all flowers & extracts except Coffee Cake; Tannenbusch 31/1 CC \"Coffee Cake\" has its own 50 kg free. After the free grams: €0.40/g standard, Super Value flowers €0.20/g (per Adaora 2026-11-03).",
+        # Cumulative free-gram allowances (see FREE ALLOWANCES below). Buckets
+        # are matched in order; "rest" takes every fee-eligible gram no earlier
+        # bucket claimed.
+        "allowances": [
+            {"name": "Coffee Cake", "free_kg": 50,
+             "scope_sql": "LOWER(oi.product_name) LIKE '%coffee cake%'"},
+            {"name": "All other products", "free_kg": 1150, "scope": "rest",
+             "from_date": "2026-04-01"},
+        ],
     },
     "cantourage": {
         "type": "per_gram", "rate": 0.40,
@@ -549,9 +556,13 @@ MANUFACTURER_FEES = {
     },
     "novacana": {
         "type": "per_gram", "rate": 0.30,
-        "label": "€0.30 / g", "desc": "Per-gram transaction fee",
+        "label": "€0.30 / g", "desc": "Per-gram fee; Novacana's own \"Nova\" strains: first 100 kg free, then €0.30/g (Super Value €0.20/g)",
         "effective_date": "2026-01-01",
-        "notes": "",
+        "notes": "100 kg one-time free on Novacana's own strains only (brand = Novacana AND product name starts with \"Nova\"), counted from their first sale. Third-party products attributed to Novacana (Remexian, Kineo, Aleph Amber, vapes, ...) have no free allowance. Per Adaora 2026-11-03.",
+        "allowances": [
+            {"name": "Nova strains", "free_kg": 100,
+             "scope_sql": "(LOWER(oi.product_brand_name) = 'novacana' AND LOWER(oi.product_name) LIKE 'nova %')"},
+        ],
     },
     "kineo": {
         "type": "per_gram", "rate": 0.00,
@@ -629,9 +640,10 @@ def calc_fee(fee_info: dict, volume_g, revenue, months: int = 1) -> float:
     vol = float(volume_g or 0)
     rev = float(revenue or 0)
     if t == "per_gram":
-        free_g = fee_info.get("free_kg", 0) * 1000  # one-time free allowance
-        billable = max(0, vol - free_g)
-        return billable * r
+        # Free-gram allowances are cumulative across periods and handled by
+        # apply_allowances() (they used to be subtracted here per period,
+        # which re-granted the whole allowance in every window viewed).
+        return vol * r
     elif t == "percentage":
         return rev * r
     elif t == "fixed":
@@ -787,6 +799,133 @@ def calc_fee_split(fee_info: dict, r: dict) -> tuple[float, float, float]:
     std = calc_fee(fee_info, r.get("std_fee_volume_g", 0), r.get("std_fee_net_revenue_eur", 0))
     sv = float(r.get("sv_fee_eur") or 0) if fee_info else 0.0
     return std + sv, std, sv
+
+
+# ── FREE ALLOWANCES (cumulative free grams) ──────────────────
+# Some deals start with a one-time bundle of free grams (Sanity: 1,150 kg,
+# Coffee Cake: 50 kg, Novacana's own "Nova" strains: 100 kg). A bundle is
+# used up ACROSS periods, so whether a given month is free depends on
+# everything sold before it - like a prepaid allowance. For every period
+# we therefore (1) count the grams each bucket consumed before the period
+# started (one small query, cached like everything else) and (2) walk the
+# period's grams against what is left. Standard and Super Value grams both
+# draw from the bucket; once it is empty the standard rate and the SV rate
+# apply. When a bucket runs out mid-period the billable share is applied
+# pro-rata to standard and SV grams of that period.
+#
+# fee_info["allowances"] = [ {name, free_kg, scope_sql | scope:"rest", from_date?}, ... ]
+#   scope_sql : SQL predicate on oi.* selecting the bucket's products
+#   "rest"    : every fee-eligible gram not claimed by an earlier bucket
+#   from_date : only grams sold on/after this date count (default: all)
+
+def _allowances(fee_info: dict) -> list:
+    return list((fee_info or {}).get("allowances") or [])
+
+
+def _allowance_scope(a: dict, named: list) -> str:
+    if a.get("scope") == "rest":
+        others = [n["scope_sql"] for n in named]
+        return "(NOT (" + " OR ".join(others) + "))" if others else "TRUE"
+    return a["scope_sql"]
+
+
+def _allowance_since(a: dict) -> str:
+    return (f" AND DATE(o.created_at, 'Europe/Berlin') >= DATE('{a['from_date']}')"
+            if a.get("from_date") else "")
+
+
+def allowance_cols(fee_info: dict, store: str, indent: str = "      ") -> str:
+    """Extra SELECT columns: per allowance bucket, the period's standard and
+    Super Value grams and the SV fee those grams would carry at full rate."""
+    alw = _allowances(fee_info)
+    if not alw:
+        return ""
+    has_sv = store_cfg(store)["features"].get("collections") and store_cfg(store)["features"].get("fees")
+    sv = SUPER_VALUE_FILTER_EXPR if has_sv else "FALSE"
+    named = [a for a in alw if a.get("scope") != "rest"]
+    cols = []
+    for i, a in enumerate(alw):
+        scope = _allowance_scope(a, named) + _allowance_since(a)
+        cols.append(
+            f"{indent}SUM(CASE WHEN {FEE_CAT_FILTER} AND NOT {sv} AND {scope} THEN oi.quantity_after_cancellations ELSE 0 END) AS alw{i}_std_g,\n"
+            f"{indent}SUM(CASE WHEN {sv} AND {scope} THEN oi.quantity_after_cancellations ELSE 0 END) AS alw{i}_sv_g,\n"
+            f"{indent}SUM(CASE WHEN {sv} AND {scope} THEN oi.quantity_after_cancellations * {_sv_rate_sql()} ELSE 0 END) AS alw{i}_sv_fee")
+    return ",\n" + ",\n".join(cols)
+
+
+async def allowance_prior_usage(fee_info: dict, mfg_where: str, mfg_p: list,
+                                store: str, before_date: str) -> list:
+    """Grams each allowance bucket consumed BEFORE before_date (all
+    categories/collections, i.e. independent of the dashboard filters)."""
+    alw = _allowances(fee_info)
+    if not alw:
+        return []
+    if not before_date:
+        return [0.0] * len(alw)
+    ck = cache_key("alw_prior", mfg=mfg_where, store=store, before=before_date,
+                   cfg=json.dumps(alw, sort_keys=True))
+    cached = cache_get(ck)
+    if cached is not None:
+        return list(cached)
+    _DS = store_cfg(store)["dataset"]
+    named = [a for a in alw if a.get("scope") != "rest"]
+    cols = ",\n".join(
+        f"      SUM(CASE WHEN {FEE_CAT_FILTER} AND {_allowance_scope(a, named)}{_allowance_since(a)} "
+        f"THEN oi.quantity_after_cancellations ELSE 0 END) AS alw{i}_g"
+        for i, a in enumerate(alw))
+    sql = f"""
+    SELECT
+{cols}
+    FROM `{_DS}.order_items` oi
+    JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
+    WHERE {mfg_where} {NET_ORDER_FILTER}
+      AND DATE(o.created_at, 'Europe/Berlin') < DATE(@alw_before)
+    """
+    params = mfg_p + [bigquery.ScalarQueryParameter("alw_before", "DATE", before_date)]
+    rows = await run_query_async(sql, params)
+    r = rows[0] if rows else {}
+    used = [float(r.get(f"alw{i}_g") or 0) for i in range(len(alw))]
+    cache_set(ck, used)
+    return used
+
+
+def apply_allowances(fee_info: dict, r: dict, used: list) -> tuple[float, float, float, list]:
+    """Fee for one row (period) of a deal with free allowances.
+    `used` holds grams consumed per bucket before this row and is UPDATED in
+    place so consecutive rows (months) draw from the same bundles.
+    Returns (total, standard, super_value, bucket_details)."""
+    alw = _allowances(fee_info)
+    rate = float(fee_info.get("rate") or 0)
+    # Grams outside every bucket (e.g. Novacana's third-party products) pay
+    # the normal rates from the first gram.
+    other_std_g = float(r.get("std_fee_volume_g") or 0)
+    other_sv_fee = float(r.get("sv_fee_eur") or 0)
+    details = []
+    std_fee = 0.0
+    sv_fee = 0.0
+    for i, a in enumerate(alw):
+        other_std_g -= float(r.get(f"alw{i}_std_g") or 0)
+        other_sv_fee -= float(r.get(f"alw{i}_sv_fee") or 0)
+    std_fee += max(0.0, other_std_g) * rate
+    sv_fee += max(0.0, other_sv_fee)
+    for i, a in enumerate(alw):
+        std_g = float(r.get(f"alw{i}_std_g") or 0)
+        sv_g = float(r.get(f"alw{i}_sv_g") or 0)
+        sv_full = float(r.get(f"alw{i}_sv_fee") or 0)
+        total_g = std_g + sv_g
+        free_cap = float(a.get("free_kg") or 0) * 1000
+        remaining = max(0.0, free_cap - used[i])
+        free_g = min(total_g, remaining)
+        billable_frac = ((total_g - free_g) / total_g) if total_g else 0.0
+        std_fee += std_g * billable_frac * rate
+        sv_fee += sv_full * billable_frac
+        used[i] += total_g
+        details.append({
+            "name": a.get("name"), "free_kg": a.get("free_kg"),
+            "used_before_g": used[i] - total_g, "period_g": total_g, "free_g": free_g,
+            "billable_g": total_g - free_g, "remaining_g": max(0.0, free_cap - used[i]),
+        })
+    return std_fee + sv_fee, std_fee, sv_fee, details
 
 
 def _split_category_param(category: str) -> tuple[list, bool, bool, list]:
@@ -1411,7 +1550,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
         SAFE_DIVIDE(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur), COUNT(DISTINCT o.order_id)) AS avg_order_value,
         SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
         SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur,
-{fee_split_cols(store, "        ")}
+{fee_split_cols(store, "        ")}{allowance_cols(MANUFACTURER_FEES.get(slug, {}), store, "        ")}
       FROM `{_DS}.order_items` oi
       JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
       WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1497,7 +1636,12 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     rows = await run_query_async(sql, params)
     r = rows[0] if rows else {}
     fee = MANUFACTURER_FEES.get(slug, {})
-    fee_amount, fee_std, fee_sv = calc_fee_split(fee, r)
+    alw_detail = []
+    if _allowances(fee):
+        used = list(await allowance_prior_usage(fee, mfg_where, mfg_p, store, start_date))
+        fee_amount, fee_std, fee_sv, alw_detail = apply_allowances(fee, r, used)
+    else:
+        fee_amount, fee_std, fee_sv = calc_fee_split(fee, r)
 
     def safe_growth(curr, prev):
         if curr is None or prev is None or prev == 0:
@@ -1544,7 +1688,8 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
             "repeat_purchase_rate": safe_growth(r.get("repeat_purchase_rate"), r.get("prev_repeat_rate")),
         },
         "fee": {"amount": fee_amount, "standard": fee_std, "super_value": fee_sv,
-                "std_volume_g": r.get("std_fee_volume_g", 0), "sv_volume_g": r.get("sv_fee_volume_g", 0)},
+                "std_volume_g": r.get("std_fee_volume_g", 0), "sv_volume_g": r.get("sv_fee_volume_g", 0),
+                "allowances": alw_detail},
         "comp": _comp_info,
     }
     cache_set(ck, result)
@@ -1599,7 +1744,7 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
       SAFE_DIVIDE(SUM(oi.refund_amount_including_vat_eur), NULLIF(SUM(oi.total_price_after_cancellations_before_discounts_including_vat_eur),0)) AS refund_rate,
       SUM(CASE WHEN {FEE_CAT_FILTER} THEN oi.quantity_after_cancellations ELSE 0 END) AS fee_volume_g,
       SUM(CASE WHEN {FEE_CAT_FILTER} THEN (oi.total_price_after_cancellations_and_discounts_including_vat_eur - COALESCE(oi.vat_amount_after_cancellations_eur,0)) ELSE 0 END) AS fee_net_revenue_eur,
-{fee_split_cols(store)}
+{fee_split_cols(store)}{allowance_cols(MANUFACTURER_FEES.get(slug, {}), store)}
     FROM `{_DS}.order_items` oi
     JOIN `{_DS}.orders` o ON oi.order_id = o.order_id
     WHERE {mfg_where} {date_where} {NET_ORDER_FILTER}
@@ -1609,8 +1754,15 @@ async def _get_trends(mfg_name: str, slug: str, start_date: str = "", end_date: 
     rows = await run_query_async(sql, params)
 
     fee = MANUFACTURER_FEES.get(slug, {})
-    for r in rows:
-        r["fee_amount"], r["fee_std"], r["fee_sv"] = calc_fee_split(fee, r)
+    if _allowances(fee):
+        # Months are walked in order, each drawing on what the earlier ones
+        # (and everything before start_date) left in the free bundles.
+        used = list(await allowance_prior_usage(fee, mfg_where, mfg_p, store, start_date))
+        for r in rows:
+            r["fee_amount"], r["fee_std"], r["fee_sv"], r["allowances"] = apply_allowances(fee, r, used)
+    else:
+        for r in rows:
+            r["fee_amount"], r["fee_std"], r["fee_sv"] = calc_fee_split(fee, r)
 
     result = {"data": rows}
     cache_set(ck, result)
@@ -2471,6 +2623,7 @@ async def api_recon_combined(
             "sv_units": r.get("sv_fee_volume_g", 0),
             "sv_revenue": r.get("sv_fee_net_revenue_eur", 0),
             "sv_fee": r.get("fee_sv", 0),
+            "allowances": r.get("allowances", []),
         })
 
     # Map breakdowns
@@ -2637,6 +2790,7 @@ async def api_recon_combined(
         "trend": trend_out,
         "growth": growth_out,
         "fee_detail": fee_detail,
+        "fee_allowances": summary.get("fee", {}).get("allowances", []),
         "category": cat_out,
         "origin": ori_out,
         "price_tier": pt_out,
