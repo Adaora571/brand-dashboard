@@ -1826,7 +1826,11 @@ async def api_summary(
     slug = resolve_slug(hashed_slug)
     mfg_name = verify_session(request, slug)
     category = fold_collection(category, collection)
-    return await _get_summary(mfg_name, slug, start_date, end_date, category, compare_start, compare_end, product_line)
+    res = dict(await _get_summary(mfg_name, slug, start_date, end_date, category, compare_start, compare_end, product_line))
+    # Fee / kickback figures are internal (sales dashboard only); a brand
+    # dashboard never carries them, not even the brand's own.
+    res.pop("fee", None)
+    return res
 
 
 # ============================================================
