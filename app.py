@@ -535,7 +535,7 @@ MANUFACTURER_FEES = {
         "type": "per_gram", "rate": 0.30,
         "rate_schedule": [{"from": "2027-01-01", "rate": 0.40}],
         "label": "€0.30 / g (2026) → €0.40 / g (2027)",
-        "desc": "1,150 kg one-time free (used up end of Jul 2026); from 1 Sep 2026 another 50 kg free on all flowers except Tubitti Frubitti 31/1, with no kickback on anything until it is used; then €0.30/g in 2026 and €0.40/g from 2027 (Super Value €0.20/g)",
+        "desc": "1,150 kg one-time free (used up end of Jul 2026); from 1 Sep 2026 another 50 kg free on regular flowers (not Super Value, not Tubitti Frubitti 31/1), with no standard kickback until it is used; then €0.30/g in 2026 and €0.40/g from 2027. Super Value flowers pay €0.20/g (or their own kickback) from the first gram",
         "effective_date": "2026-04-01",
         "notes": "Replaces advance deal from Apr 2026. 1,150 kg one-time free (800 original + 350 additional) on all flowers & extracts, counted from Sanity's first sale (reached end of July 2026). From 1 Sep 2026 a further 50 kg free on every Sanity flower except Tannenbusch 31/1 TF \"Tubitti Frubitti\" (originally Coffee Cake only; widened by Sven 2026-11-04), and NO kickback is charged on any Sanity product until those 50 kg are used (Tubitti 31/1 is free meanwhile but does not count toward them). After that: €0.30/g for the rest of 2026, €0.40/g from Jan 2027; Super Value flowers €0.20/g. Per Adaora 2026-11-03.",
         "allowances": [
@@ -546,9 +546,12 @@ MANUFACTURER_FEES = {
             # Tubitti Frubitti (Sven, 2026-11-04). While it lasts NO kickback
             # is charged on any Sanity product (Tubitti 31/1 included - it is
             # free but does not use up the 50 kg).
-            {"name": "50 kg flowers (excl. Tubitti Frubitti 31/1)", "free_kg": 50, "gates_all": True,
+            # Super Value flowers are outside it AND pay their SV kickback
+            # from the first gram even while it runs (Adaora 2026-11-04).
+            {"name": "50 kg flowers (excl. Super Value & Tubitti Frubitti 31/1)", "free_kg": 50,
+             "gates_all": True, "gate_exempt_sv": True,
              "from_date": "2026-09-01",
-             "scope_sql": "(({CATEGORY}) = 'flower' AND NOT (LOWER(oi.product_name) LIKE '%tannenbusch 31/1%' AND LOWER(oi.product_name) LIKE '%tubitti%'))"},
+             "scope_sql": "(({CATEGORY}) = 'flower' AND NOT {SV} AND NOT (LOWER(oi.product_name) LIKE '%tannenbusch 31/1%' AND LOWER(oi.product_name) LIKE '%tubitti%'))"},
         ],
     },
     "cantourage": {
@@ -973,7 +976,7 @@ def _allowance_scope(a: dict, named: list) -> str:
         sql = "(NOT (" + " OR ".join(others) + "))" if others else "TRUE"
     else:
         sql = a["scope_sql"]
-    return sql.replace("{CATEGORY}", CATEGORY_EXPR)
+    return sql.replace("{SV}", SUPER_VALUE_FILTER_EXPR).replace("{CATEGORY}", CATEGORY_EXPR)
 
 
 def _allowance_since(a: dict) -> str:
@@ -1083,23 +1086,28 @@ def apply_allowances(fee_info: dict, r: dict, used: list) -> tuple[float, float,
             frac = (x["free_g"] / x["total_g"]) if x["total_g"] else 1.0
             gate_free_frac = max(gate_free_frac, frac)
     gate_bill = 1.0 - gate_free_frac
+    # A gate may leave Super Value grams out: they then pay from the first gram.
+    sv_gate = 1.0 if any(a.get("gates_all") and a.get("gate_exempt_sv") for a in alw) else gate_bill
 
     std_fee = max(0.0, other_std_fee) * gate_bill
-    sv_fee = max(0.0, other_sv_fee) * gate_bill
+    sv_fee = max(0.0, other_sv_fee) * sv_gate
     details = []
     for x in rows:
         own_bill = ((x["total_g"] - x["free_g"]) / x["total_g"]) if x["total_g"] else 0.0
         # The gating bucket's own free grams ARE the gate - applying the gate
         # to it again would discount it twice.
-        bill = own_bill if x["a"].get("gates_all") else own_bill * gate_bill
+        is_gate = bool(x["a"].get("gates_all"))
+        bill = own_bill if is_gate else own_bill * gate_bill
+        bill_sv = own_bill if is_gate else own_bill * sv_gate
         std_fee += x["std_fee_full"] * bill
-        sv_fee += x["sv_fee_full"] * bill
+        sv_fee += x["sv_fee_full"] * bill_sv
         details.append({
             "name": x["a"].get("name"), "free_kg": x["a"].get("free_kg"),
             "gates_all": bool(x["a"].get("gates_all")),
             "used_before_g": x["used_before"],
-            "period_g": x["total_g"], "free_g": x["total_g"] - x["total_g"] * bill,
-            "billable_g": x["total_g"] * bill,
+            "period_g": x["total_g"],
+            "free_g": x["total_g"] - (x["std_g"] * bill + x["sv_g"] * bill_sv),
+            "billable_g": x["std_g"] * bill + x["sv_g"] * bill_sv,
             "remaining_g": x["remaining_after"],
         })
     return std_fee + sv_fee, std_fee, sv_fee, details
