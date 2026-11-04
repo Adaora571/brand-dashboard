@@ -1311,8 +1311,8 @@ function renderFees() {
 
   const kg = g => (Number(g || 0) / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' kg';
   const alwNote = (allData.fee_allowances || []).map(a =>
-    `${a.name}: ${kg(a.free_kg * 1000)} free bundle${a.gates_all ? ' (no kickback on any product while it lasts)' : ''} — ${kg(a.used_before_g)} used before this period, `
-    + `${kg(a.period_g)} in period (${kg(a.free_g)} free, ${kg(a.billable_g)} billed), ${kg(a.remaining_g)} remaining.`).join(' ');
+    `${a.name}: ${kg(a.free_kg * 1000)} free bundle${a.gates_all ? (a.gate_exempt_sv ? ' (no standard kickback while it lasts; Super Value is charged)' : ' (no kickback on any product while it lasts)') : ''} — ${kg(a.used_before_g)} used before this period, `
+    + `${kg(a.period_g)} in period (${kg(a.free_g)} free, ${kg(a.billable_g)} billed${(a.billable_sv_g || 0) > 0 ? (Math.abs(a.billable_sv_g - a.billable_g) < 1 ? ' — all Super Value' : ', of which ' + kg(a.billable_sv_g) + ' Super Value') : ''}), ${kg(a.remaining_g)} remaining.`).join(' ');
   const fixedNote = fixed ? ` ${feeInfo.label || 'Fixed fee'}: the fixed amount is the fee (pro-rated by days for partial months); Standard and Super Value are calculated for comparison only.` : '';
   document.getElementById('feeNote').textContent = fixedNote + (FEATURES.collections
     ? 'Fee base = flowers & extracts. Super Value flowers pay ' + svRate + ' (replacing the brand deal on those grams'

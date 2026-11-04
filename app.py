@@ -1104,6 +1104,8 @@ def apply_allowances(fee_info: dict, r: dict, used: list) -> tuple[float, float,
         details.append({
             "name": x["a"].get("name"), "free_kg": x["a"].get("free_kg"),
             "gates_all": bool(x["a"].get("gates_all")),
+            "gate_exempt_sv": bool(x["a"].get("gate_exempt_sv")),
+            "billable_sv_g": x["sv_g"] * bill_sv,
             "used_before_g": x["used_before"],
             "period_g": x["total_g"],
             "free_g": x["total_g"] - (x["std_g"] * bill + x["sv_g"] * bill_sv),
@@ -1843,6 +1845,7 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
                 "period_g": sum(p["period_g"] for p in per),
                 "free_g": sum(p["free_g"] for p in per),
                 "billable_g": sum(p["billable_g"] for p in per),
+                "billable_sv_g": sum(p.get("billable_sv_g", 0) for p in per),
                 "remaining_g": per[-1]["remaining_g"],
             })
     else:
