@@ -535,13 +535,20 @@ MANUFACTURER_FEES = {
         "type": "per_gram", "rate": 0.30,
         "rate_schedule": [{"from": "2027-01-01", "rate": 0.40}],
         "label": "€0.30 / g (2026) → €0.40 / g (2027)",
-        "desc": "1,150 kg one-time free (used up end of Jul 2026); no kickback at all until Coffee Cake's own 50 kg free are used, then €0.30/g in 2026 and €0.40/g from 2027 (Super Value €0.20/g)",
+        "desc": "1,150 kg one-time free (used up end of Jul 2026); from 1 Sep 2026 another 50 kg free on all flowers except Tubitti Frubitti 31/1, with no kickback on anything until it is used; then €0.30/g in 2026 and €0.40/g from 2027 (Super Value €0.20/g)",
         "effective_date": "2026-04-01",
-        "notes": "Replaces advance deal from Apr 2026. 1,150 kg one-time free (800 original + 350 additional) on all flowers & extracts, counted from Sanity's first sale (reached end of July 2026). Tannenbusch 31/1 CC \"Coffee Cake\" has its own separate 50 kg free bucket, and by agreement NO kickback is charged on any Sanity product until that bucket is used up. After that: €0.30/g for the rest of 2026, €0.40/g from Jan 2027; Super Value flowers €0.20/g. Per Adaora 2026-11-03.",
+        "notes": "Replaces advance deal from Apr 2026. 1,150 kg one-time free (800 original + 350 additional) on all flowers & extracts, counted from Sanity's first sale (reached end of July 2026). From 1 Sep 2026 a further 50 kg free on every Sanity flower except Tannenbusch 31/1 TF \"Tubitti Frubitti\" (originally Coffee Cake only; widened by Sven 2026-11-04), and NO kickback is charged on any Sanity product until those 50 kg are used (Tubitti 31/1 is free meanwhile but does not count toward them). After that: €0.30/g for the rest of 2026, €0.40/g from Jan 2027; Super Value flowers €0.20/g. Per Adaora 2026-11-03.",
         "allowances": [
-            {"name": "Coffee Cake", "free_kg": 50, "gates_all": True,
-             "scope_sql": "LOWER(oi.product_name) LIKE '%coffee cake%'"},
-            {"name": "All other products", "free_kg": 1150, "scope": "rest"},
+            # 1,150 kg on everything, from the first sale; ran out end of Jul 2026.
+            {"name": "1,150 kg bundle", "free_kg": 1150,
+             "scope_sql": "TRUE", "to_date": "2026-08-31"},
+            # 50 kg from 1 Sep 2026 on every flower EXCEPT Tannenbusch 31/1
+            # Tubitti Frubitti (Sven, 2026-11-04). While it lasts NO kickback
+            # is charged on any Sanity product (Tubitti 31/1 included - it is
+            # free but does not use up the 50 kg).
+            {"name": "50 kg flowers (excl. Tubitti Frubitti 31/1)", "free_kg": 50, "gates_all": True,
+             "from_date": "2026-09-01",
+             "scope_sql": "(({CATEGORY}) = 'flower' AND NOT (LOWER(oi.product_name) LIKE '%tannenbusch 31/1%' AND LOWER(oi.product_name) LIKE '%tubitti%'))"},
         ],
     },
     "cantourage": {
@@ -959,15 +966,24 @@ def _allowances(fee_info: dict) -> list:
 
 
 def _allowance_scope(a: dict, named: list) -> str:
+    """SQL predicate for a bucket. "{CATEGORY}" in a scope_sql is replaced
+    by CATEGORY_EXPR (which is defined after the fee table)."""
     if a.get("scope") == "rest":
         others = [n["scope_sql"] for n in named]
-        return "(NOT (" + " OR ".join(others) + "))" if others else "TRUE"
-    return a["scope_sql"]
+        sql = "(NOT (" + " OR ".join(others) + "))" if others else "TRUE"
+    else:
+        sql = a["scope_sql"]
+    return sql.replace("{CATEGORY}", CATEGORY_EXPR)
 
 
 def _allowance_since(a: dict) -> str:
-    return (f" AND DATE(o.created_at, 'Europe/Berlin') >= DATE('{a['from_date']}')"
-            if a.get("from_date") else "")
+    """Date window of a bucket: from_date / to_date (both inclusive, optional)."""
+    out = ""
+    if a.get("from_date"):
+        out += f" AND DATE(o.created_at, 'Europe/Berlin') >= DATE('{a['from_date']}')"
+    if a.get("to_date"):
+        out += f" AND DATE(o.created_at, 'Europe/Berlin') <= DATE('{a['to_date']}')"
+    return out
 
 
 def allowance_cols(fee_info: dict, store: str, indent: str = "      ") -> str:
@@ -1073,7 +1089,9 @@ def apply_allowances(fee_info: dict, r: dict, used: list) -> tuple[float, float,
     details = []
     for x in rows:
         own_bill = ((x["total_g"] - x["free_g"]) / x["total_g"]) if x["total_g"] else 0.0
-        bill = own_bill * gate_bill
+        # The gating bucket's own free grams ARE the gate - applying the gate
+        # to it again would discount it twice.
+        bill = own_bill if x["a"].get("gates_all") else own_bill * gate_bill
         std_fee += x["std_fee_full"] * bill
         sv_fee += x["sv_fee_full"] * bill
         details.append({
