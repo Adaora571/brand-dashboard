@@ -1815,8 +1815,28 @@ async def _get_summary(mfg_name: str, slug: str, start_date: str = "", end_date:
     fee = MANUFACTURER_FEES.get(slug, {})
     alw_detail = []
     if _allowances(fee):
-        used = list(await allowance_prior_usage(fee, mfg_where, mfg_p, store, start_date))
-        fee_amount, fee_std, fee_sv, alw_detail = apply_allowances(fee, r, used)
+        # Free bundles are walked MONTH BY MONTH (a gate that closes in
+        # September must not discount August), so the period total is the
+        # sum of the monthly rows, never one big pro-rata over the range.
+        tr = await _get_trends(mfg_name, slug, start_date, end_date, category, product_line,
+                               start_time, end_time, store)
+        months = tr.get("data", [])
+        fee_std = sum(float(x.get("fee_std") or 0) for x in months)
+        fee_sv = sum(float(x.get("fee_sv") or 0) for x in months)
+        fee_amount = fee_std + fee_sv
+        alw_detail = []
+        for i in range(len(_allowances(fee))):
+            per = [x["allowances"][i] for x in months if x.get("allowances")]
+            if not per:
+                continue
+            alw_detail.append({
+                **per[0],
+                "used_before_g": per[0]["used_before_g"],
+                "period_g": sum(p["period_g"] for p in per),
+                "free_g": sum(p["free_g"] for p in per),
+                "billable_g": sum(p["billable_g"] for p in per),
+                "remaining_g": per[-1]["remaining_g"],
+            })
     else:
         fee_amount, fee_std, fee_sv = calc_fee_split(fee, r)
     fee_calc = fee_amount
